@@ -16,10 +16,17 @@ defmodule Breakthrough.Games.GameServer do
     mode = Keyword.get(opts, :mode, :pvp)
     cleanup_timeout_ms = Keyword.get(opts, :cleanup_timeout_ms, @default_cleanup_timeout_ms)
     ai_strategy = Keyword.get(opts, :ai_strategy, RandomStrategy)
+    players = Keyword.get(opts, :players)
 
     GenServer.start_link(
       __MODULE__,
-      %{id: id, mode: mode, cleanup_timeout_ms: cleanup_timeout_ms, ai_strategy: ai_strategy},
+      %{
+        id: id,
+        mode: mode,
+        cleanup_timeout_ms: cleanup_timeout_ms,
+        ai_strategy: ai_strategy,
+        players: players
+      },
       name: via_tuple(id)
     )
   end
@@ -35,6 +42,10 @@ defmodule Breakthrough.Games.GameServer do
 
   def track_connection(game_id, player_token, pid) do
     GenServer.call(via_tuple(game_id), {:track_connection, player_token, pid})
+  end
+
+  def create_rematch(game_id, player_token) do
+    GenServer.call(via_tuple(game_id), {:create_rematch, player_token})
   end
 
   def resign(game_id, player_token) do
@@ -53,20 +64,24 @@ defmodule Breakthrough.Games.GameServer do
         id: id,
         mode: mode,
         cleanup_timeout_ms: cleanup_timeout_ms,
-        ai_strategy: ai_strategy
+        ai_strategy: ai_strategy,
+        players: players
       }) do
-    {:ok,
-     %{
-       id: id,
-       game: Game.new(),
-       mode: mode,
-       players: initial_players(mode),
-       spectators: MapSet.new(),
-       cleanup_timeout_ms: cleanup_timeout_ms,
-       cleanup_timer_ref: nil,
-       connections: %{},
-       ai_strategy: ai_strategy
-     }}
+    state = %{
+      id: id,
+      game: Game.new(),
+      mode: mode,
+      players: players || initial_players(mode),
+      spectators: MapSet.new(),
+      cleanup_timeout_ms: cleanup_timeout_ms,
+      cleanup_timer_ref: nil,
+      connections: %{},
+      ai_strategy: ai_strategy,
+      rematch_votes: MapSet.new()
+    }
+
+    GameTracker.track_game_updated(public_state(state))
+    {:ok, state}
   end
 
   @impl true
@@ -90,12 +105,38 @@ defmodule Breakthrough.Games.GameServer do
     {:reply, {:ok, public_state(next_state)}, next_state}
   end
 
+  def handle_call({:create_rematch, player_token}, _from, state) do
+    with {:ok, player_side} <- player_side_for(state, player_token),
+         :ok <- ensure_finished_game(state.game) do
+      case maybe_create_rematch(state, player_side) do
+        {:pending, next_state} ->
+          broadcast_state(next_state)
+          {:reply, {:pending, public_state(next_state)}, next_state}
+
+        {:ok, game_id, next_state} ->
+          Phoenix.PubSub.broadcast(
+            Breakthrough.PubSub,
+            topic(state.id),
+            {:rematch_created, game_id}
+          )
+
+          {:reply, {:ok, game_id}, next_state}
+
+        {:error, reason} ->
+          {:reply, {:error, reason}, state}
+      end
+    else
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   def handle_call({:make_move, player_token, from, to}, _from, state) do
     with {:ok, player_side} <- player_side_for(state, player_token),
          :ok <- ensure_active_game(state.game),
          :ok <- ensure_turn(state.game, player_side),
          {:ok, next_game} <- Game.move(state.game, from, to) do
-      next_state = %{state | game: next_game} |> maybe_trigger_ai()
+      next_state = %{state | game: next_game, rematch_votes: MapSet.new()} |> maybe_trigger_ai()
       broadcast_state(next_state)
       {:reply, {:ok, public_state(next_state)}, next_state}
     else
@@ -108,7 +149,7 @@ defmodule Breakthrough.Games.GameServer do
     with {:ok, player_side} <- player_side_for(state, player_token),
          :ok <- ensure_active_game(state.game),
          {:ok, next_game} <- Game.resign(state.game, player_side) do
-      next_state = %{state | game: next_game}
+      next_state = %{state | game: next_game, rematch_votes: MapSet.new()}
       broadcast_state(next_state)
       {:reply, {:ok, public_state(next_state)}, next_state}
     else
@@ -121,6 +162,7 @@ defmodule Breakthrough.Games.GameServer do
     next_state =
       state
       |> Map.put(:game, Game.new())
+      |> Map.put(:rematch_votes, MapSet.new())
       |> maybe_trigger_ai()
       |> cancel_cleanup_if_needed()
 
@@ -221,6 +263,9 @@ defmodule Breakthrough.Games.GameServer do
 
   defp ensure_active_game(_game), do: :ok
 
+  defp ensure_finished_game(%{winner: winner}) when winner in [:white, :black], do: :ok
+  defp ensure_finished_game(_game), do: {:error, :not_finished}
+
   defp ensure_turn(%{current_player: current_player}, current_player), do: :ok
   defp ensure_turn(_game, _side), do: {:error, :not_your_turn}
 
@@ -246,6 +291,40 @@ defmodule Breakthrough.Games.GameServer do
   end
 
   defp maybe_trigger_ai(state), do: state
+
+  defp maybe_create_rematch(%{mode: :vs_ai} = state, :white) do
+    with {:ok, game_id} <- Breakthrough.Games.GameManager.create_game(rematch_game_opts(state)) do
+      {:ok, game_id, %{state | rematch_votes: MapSet.new()}}
+    end
+  end
+
+  defp maybe_create_rematch(%{mode: :pvp} = state, player_side) do
+    next_state = %{state | rematch_votes: MapSet.put(state.rematch_votes, player_side)}
+
+    if MapSet.size(next_state.rematch_votes) == 2 do
+      with {:ok, game_id} <- Breakthrough.Games.GameManager.create_game(rematch_game_opts(state)) do
+        {:ok, game_id, %{next_state | rematch_votes: MapSet.new()}}
+      end
+    else
+      {:pending, next_state}
+    end
+  end
+
+  defp rematch_game_opts(%{mode: :vs_ai, ai_strategy: ai_strategy, players: players}) do
+    [
+      mode: :vs_ai,
+      ai_strategy: ai_strategy,
+      players: %{white: players.white, black: @ai_token}
+    ]
+  end
+
+  defp rematch_game_opts(%{mode: :pvp, ai_strategy: ai_strategy, players: players}) do
+    [
+      mode: :pvp,
+      ai_strategy: ai_strategy,
+      players: %{white: players.black, black: players.white}
+    ]
+  end
 
   defp maybe_schedule_cleanup(state) do
     cond do
@@ -322,11 +401,14 @@ defmodule Breakthrough.Games.GameServer do
       mode: state.mode,
       players: state.players,
       player_presence: player_presence(state),
-      spectator_count: spectator_count(state)
+      spectator_count: spectator_count(state),
+      rematch_votes: state.rematch_votes
     }
   end
 
   defp broadcast_state(state) do
+    GameTracker.track_game_updated(public_state(state))
+
     Phoenix.PubSub.broadcast(
       Breakthrough.PubSub,
       topic(state.id),

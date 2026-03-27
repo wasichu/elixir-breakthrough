@@ -102,15 +102,24 @@ defmodule BreakthroughWeb.GameLiveTest do
   test "home page shows lobby counts and recent game links", %{conn: conn} do
     first_game = "recent-" <> Integer.to_string(System.unique_integer([:positive]))
     second_game = "recent-" <> Integer.to_string(System.unique_integer([:positive]))
+    ai_game = "recent-ai-" <> Integer.to_string(System.unique_integer([:positive]))
 
     {:ok, _first} = Breakthrough.Games.GameManager.create_game(id: first_game)
     {:ok, _second} = Breakthrough.Games.GameManager.create_game(id: second_game)
+    {:ok, _ai} = Breakthrough.Games.GameManager.create_game(id: ai_game, mode: :vs_ai)
+    {:ok, :white, _state} = Breakthrough.Games.GameManager.join_game(first_game, "lobby-white")
+    {:ok, :black, _state} = Breakthrough.Games.GameManager.join_game(first_game, "lobby-black")
 
     {:ok, view, _html} = live(conn, ~p"/")
 
     assert has_element?(view, "#active-games-count")
     assert has_element?(view, ~s(a[href="/games/#{first_game}"]))
     assert has_element?(view, ~s(a[href="/games/#{second_game}"]))
+    assert has_element?(view, ~s(a[href="/games/#{ai_game}"]))
+    assert has_element?(view, ~s(a[href="/games/#{ai_game}"]), ai_game)
+    assert has_element?(view, ~s(a[href="/games/#{ai_game}"] span.rounded-full))
+    assert has_element?(view, ~s(a[href="/games/#{first_game}"] span), "View game")
+    assert has_element?(view, ~s(a[href="/games/#{second_game}"] span), "Join game")
   end
 
   test "selecting another current turn piece replaces the previous selection", %{conn: conn} do
@@ -254,6 +263,94 @@ defmodule BreakthroughWeb.GameLiveTest do
     assert has_element?(white_view, "#phase-value[data-phase='Black wins']")
     assert has_element?(black_view, "#phase-value[data-phase='Black wins']")
     refute has_element?(white_view, "#resign-game-button")
+  end
+
+  test "rematch redirects both players and spectators to a fresh game", %{conn: conn} do
+    game_id = create_game!()
+    white_conn = Plug.Test.init_test_session(conn, %{"player_token" => "white-rematch"})
+    black_conn = Plug.Test.init_test_session(build_conn(), %{"player_token" => "black-rematch"})
+
+    spectator_conn =
+      Plug.Test.init_test_session(build_conn(), %{"player_token" => "spectator-rematch"})
+
+    {:ok, white_view, _html} = live(white_conn, ~p"/games/#{game_id}")
+    {:ok, black_view, _html} = live(black_conn, ~p"/games/#{game_id}")
+    {:ok, spectator_view, _html} = live(spectator_conn, ~p"/games/#{game_id}")
+
+    white_view
+    |> element("#square-a7")
+    |> render_click()
+
+    white_view
+    |> element("#square-a6")
+    |> render_click()
+
+    white_view
+    |> element("#resign-game-button")
+    |> render_click()
+
+    assert has_element?(white_view, "#rematch-game-button")
+    refute has_element?(black_view, "#rematch-pending-indicator")
+
+    white_view
+    |> element("#rematch-game-button")
+    |> render_click()
+
+    assert has_element?(white_view, "#rematch-pending-indicator")
+    assert has_element?(white_view, "#rematch-note", "Waiting for Black to accept rematch.")
+    assert has_element?(black_view, "#rematch-game-button")
+    refute_redirected(white_view)
+    refute_redirected(black_view)
+    refute_redirected(spectator_view)
+
+    black_view
+    |> element("#rematch-game-button")
+    |> render_click()
+
+    {white_path, _flash} = assert_redirect(white_view)
+    {black_path, _flash} = assert_redirect(black_view)
+    {spectator_path, _flash} = assert_redirect(spectator_view)
+
+    assert white_path =~ ~r"^/games/[A-Za-z0-9_-]+$"
+    assert white_path == black_path
+    assert white_path == spectator_path
+    refute white_path == "/games/#{game_id}"
+
+    {:ok, rematch_white_view, _html} = live(white_conn, white_path)
+    {:ok, rematch_black_view, _html} = live(black_conn, black_path)
+
+    assert has_element?(rematch_white_view, "#player-side-value[data-side='black']")
+    assert has_element?(rematch_black_view, "#player-side-value[data-side='white']")
+  end
+
+  test "spectators do not get a rematch button after the game ends", %{conn: conn} do
+    game_id = create_game!()
+    white_conn = Plug.Test.init_test_session(conn, %{"player_token" => "white-no-rematch"})
+
+    black_conn =
+      Plug.Test.init_test_session(build_conn(), %{"player_token" => "black-no-rematch"})
+
+    spectator_conn =
+      Plug.Test.init_test_session(build_conn(), %{"player_token" => "spectator-no-rematch"})
+
+    {:ok, white_view, _html} = live(white_conn, ~p"/games/#{game_id}")
+    {:ok, _black_view, _html} = live(black_conn, ~p"/games/#{game_id}")
+    {:ok, spectator_view, _html} = live(spectator_conn, ~p"/games/#{game_id}")
+
+    white_view
+    |> element("#square-a7")
+    |> render_click()
+
+    white_view
+    |> element("#square-a6")
+    |> render_click()
+
+    white_view
+    |> element("#resign-game-button")
+    |> render_click()
+
+    assert has_element?(white_view, "#rematch-game-button")
+    refute has_element?(spectator_view, "#rematch-game-button")
   end
 
   test "vs ai games show the ai seat and process an ai reply move", %{conn: conn} do

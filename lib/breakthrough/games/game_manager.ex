@@ -9,11 +9,13 @@ defmodule Breakthrough.Games.GameManager do
     mode = Keyword.get(opts, :mode, :pvp)
     cleanup_timeout_ms = Keyword.get(opts, :cleanup_timeout_ms)
     ai_strategy = Keyword.get(opts, :ai_strategy)
+    players = Keyword.get(opts, :players)
 
     ensure_opts =
       [mode: mode]
       |> maybe_put_cleanup_timeout(cleanup_timeout_ms)
       |> maybe_put_ai_strategy(ai_strategy)
+      |> maybe_put_players(players)
 
     with {:ok, _pid} <- ensure_game_started(game_id, ensure_opts) do
       {:ok, game_id}
@@ -24,6 +26,7 @@ defmodule Breakthrough.Games.GameManager do
     mode = Keyword.get(opts, :mode, :pvp)
     cleanup_timeout_ms = Keyword.get(opts, :cleanup_timeout_ms)
     ai_strategy = Keyword.get(opts, :ai_strategy)
+    players = Keyword.get(opts, :players)
 
     case Registry.lookup(Breakthrough.Games.Registry, game_id) do
       [{pid, _value}] ->
@@ -34,6 +37,7 @@ defmodule Breakthrough.Games.GameManager do
           [id: game_id, mode: mode]
           |> maybe_put_cleanup_timeout(cleanup_timeout_ms)
           |> maybe_put_ai_strategy(ai_strategy)
+          |> maybe_put_players(players)
           |> then(&{GameServer, &1})
 
         case DynamicSupervisor.start_child(Breakthrough.Games.GameSupervisor, child_spec) do
@@ -81,6 +85,12 @@ defmodule Breakthrough.Games.GameManager do
     end
   end
 
+  def create_rematch(game_id, player_token) do
+    with {:ok, _pid} <- existing_game_pid(game_id) do
+      GameServer.create_rematch(game_id, player_token)
+    end
+  end
+
   def restart_game(game_id) do
     with {:ok, _pid} <- existing_game_pid(game_id) do
       GameServer.restart_game(game_id)
@@ -111,6 +121,9 @@ defmodule Breakthrough.Games.GameManager do
 
   defp maybe_put_ai_strategy(opts, nil), do: opts
   defp maybe_put_ai_strategy(opts, ai_strategy), do: Keyword.put(opts, :ai_strategy, ai_strategy)
+
+  defp maybe_put_players(opts, nil), do: opts
+  defp maybe_put_players(opts, players), do: Keyword.put(opts, :players, players)
 
   defp existing_game_pid(game_id) do
     case Registry.lookup(Breakthrough.Games.Registry, game_id) do

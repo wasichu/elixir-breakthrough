@@ -88,6 +88,28 @@ defmodule BreakthroughWeb.GameLive do
     end
   end
 
+  def handle_event("rematch-game", _params, socket) do
+    case GameManager.create_rematch(socket.assigns.game_id, socket.assigns.player_token) do
+      {:ok, _game_id} ->
+        {:noreply, socket}
+
+      {:pending, state} ->
+        {:noreply, assign_multiplayer_state(socket, state)}
+
+      {:error, :spectator} ->
+        {:noreply, put_flash(socket, :error, "Spectators cannot start a rematch.")}
+
+      {:error, :not_finished} ->
+        {:noreply, put_flash(socket, :error, "Rematch is only available after the game ends.")}
+
+      {:error, :not_found} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "That game is no longer available.")
+         |> push_navigate(to: ~p"/")}
+    end
+  end
+
   @impl true
   def handle_info({:game_updated, state}, socket) do
     {:noreply,
@@ -108,6 +130,11 @@ defmodule BreakthroughWeb.GameLive do
        disconnect_notice: "Both players left. This game expired.",
        can_interact?: false
      )}
+  end
+
+  @impl true
+  def handle_info({:rematch_created, game_id}, socket) do
+    {:noreply, push_navigate(socket, to: ~p"/games/#{game_id}")}
   end
 
   @impl true
@@ -155,6 +182,22 @@ defmodule BreakthroughWeb.GameLive do
               >
                 <.icon name="hero-flag" class="size-4" /> Resign
               </button>
+              <button
+                :if={show_rematch_button?(@game, @player_side, @rematch_votes)}
+                id="rematch-game-button"
+                type="button"
+                phx-click="rematch-game"
+                class="inline-flex items-center gap-2 rounded-full border border-emerald-300/40 bg-emerald-300/10 px-4 py-2 text-sm font-semibold text-emerald-100 transition hover:border-emerald-200 hover:bg-emerald-300/20"
+              >
+                <.icon name="hero-arrow-path-rounded-square" class="size-4" /> Rematch
+              </button>
+              <div
+                :if={show_rematch_pending?(@game, @player_side, @rematch_votes)}
+                id="rematch-pending-indicator"
+                class="inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/8 px-4 py-2 text-sm font-semibold text-emerald-100"
+              >
+                <.icon name="hero-check-circle" class="size-4" /> Rematch requested
+              </div>
             </div>
 
             <div class="overflow-hidden rounded-[1.75rem] border border-white/8 bg-zinc-950/70 p-3 sm:p-4">
@@ -231,6 +274,9 @@ defmodule BreakthroughWeb.GameLive do
                 </p>
                 <p id="phase-value" data-phase={@phase} class="mt-2 text-2xl text-white">
                   {@phase}
+                </p>
+                <p :if={@rematch_notice} id="rematch-note" class="mt-2 text-sm text-emerald-100">
+                  {@rematch_notice}
                 </p>
                 <p :if={@disconnect_notice} id="presence-note" class="mt-2 text-sm text-amber-100">
                   {@disconnect_notice}
@@ -380,6 +426,8 @@ defmodule BreakthroughWeb.GameLive do
       can_interact?:
         not socket.assigns[:game_expired] and
           can_interact?(state.game, socket.assigns[:player_side] || :spectator),
+      rematch_notice: rematch_notice(state),
+      rematch_votes: state.rematch_votes,
       disconnect_notice: disconnect_notice(state),
       player_presence: state.player_presence,
       spectator_count: state.spectator_count,
@@ -532,6 +580,33 @@ defmodule BreakthroughWeb.GameLive do
   defp show_resign_button?(%{status: status}, player_side) do
     status == :in_progress and player_side in [:white, :black]
   end
+
+  defp show_rematch_button?(%{status: :finished}, player_side, rematch_votes)
+       when player_side in [:white, :black],
+       do: not MapSet.member?(rematch_votes, player_side)
+
+  defp show_rematch_button?(_game, _player_side, _rematch_votes), do: false
+
+  defp show_rematch_pending?(%{status: :finished}, player_side, rematch_votes)
+       when player_side in [:white, :black],
+       do: MapSet.member?(rematch_votes, player_side)
+
+  defp show_rematch_pending?(_game, _player_side, _rematch_votes), do: false
+
+  defp rematch_notice(%{mode: :pvp, game: %{status: :finished}, rematch_votes: rematch_votes}) do
+    case MapSet.to_list(rematch_votes) do
+      [player_side] ->
+        "Waiting for #{player_label(opponent(player_side))} to accept rematch."
+
+      _ ->
+        nil
+    end
+  end
+
+  defp rematch_notice(_state), do: nil
+
+  defp opponent(:white), do: :black
+  defp opponent(:black), do: :white
 
   defp human_player?(player_token) when is_binary(player_token), do: true
   defp human_player?(_player_token), do: false

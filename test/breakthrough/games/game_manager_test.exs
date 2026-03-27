@@ -68,6 +68,55 @@ defmodule Breakthrough.Games.GameManagerTest do
            ]
   end
 
+  test "vs_ai create_rematch/1 creates a fresh game with the same mode" do
+    game_id = "rematch-" <> Integer.to_string(System.unique_integer([:positive]))
+    {:ok, ^game_id} = GameManager.create_game(id: game_id, mode: :vs_ai)
+    {:ok, :white, _state} = GameManager.join_game(game_id, "token-white")
+
+    assert {:ok, state} = GameManager.resign(game_id, "token-white")
+    assert state.game.status == :finished
+
+    assert {:ok, rematch_id} = GameManager.create_rematch(game_id, "token-white")
+    refute rematch_id == game_id
+
+    assert {:ok, rematch_state} = GameManager.get_state(rematch_id)
+    assert rematch_state.mode == :vs_ai
+    assert rematch_state.game.status == :not_started
+    assert rematch_state.players.white == "token-white"
+    assert rematch_state.players.black == :ai
+  end
+
+  test "pvp rematch waits for both players and swaps colors in the new game" do
+    game_id = "rematch-pvp-" <> Integer.to_string(System.unique_integer([:positive]))
+    {:ok, ^game_id} = GameManager.create_game(id: game_id)
+    {:ok, :white, _state} = GameManager.join_game(game_id, "token-white")
+    {:ok, :black, _state} = GameManager.join_game(game_id, "token-black")
+    assert {:ok, _state} = GameManager.resign(game_id, "token-white")
+
+    assert {:pending, state} = GameManager.create_rematch(game_id, "token-white")
+    assert MapSet.equal?(state.rematch_votes, MapSet.new([:white]))
+
+    assert {:ok, rematch_id} = GameManager.create_rematch(game_id, "token-black")
+    refute rematch_id == game_id
+
+    assert {:ok, rematch_state} = GameManager.get_state(rematch_id)
+    assert rematch_state.mode == :pvp
+    assert rematch_state.players.white == "token-black"
+    assert rematch_state.players.black == "token-white"
+    assert rematch_state.game.status == :not_started
+  end
+
+  test "spectators cannot create a rematch" do
+    game_id = "rematch-spectator-" <> Integer.to_string(System.unique_integer([:positive]))
+    {:ok, ^game_id} = GameManager.create_game(id: game_id)
+    {:ok, :white, _state} = GameManager.join_game(game_id, "token-white")
+    {:ok, :black, _state} = GameManager.join_game(game_id, "token-black")
+    {:ok, :spectator, _state} = GameManager.join_game(game_id, "token-spectator")
+    assert {:ok, _state} = GameManager.resign(game_id, "token-white")
+
+    assert {:error, :spectator} = GameManager.create_rematch(game_id, "token-spectator")
+  end
+
   test "lobby snapshot tracks active and recent games" do
     game_id = "lobby-" <> Integer.to_string(System.unique_integer([:positive]))
 
@@ -75,7 +124,7 @@ defmodule Breakthrough.Games.GameManagerTest do
 
     snapshot = GameManager.lobby_snapshot()
     assert snapshot.active_games_count >= 1
-    assert game_id in snapshot.recent_games
+    assert Enum.any?(snapshot.recent_games, &(&1.id == game_id))
   end
 
   test "started games expire after both connected players leave" do

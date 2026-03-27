@@ -94,12 +94,20 @@ defmodule BreakthroughWeb.HomeLive do
             </div>
             <div class="mt-4 space-y-3">
               <.link
-                :for={game_id <- @recent_games}
-                navigate={~p"/games/#{game_id}"}
+                :for={game <- @recent_games}
+                navigate={~p"/games/#{game.id}"}
                 class="flex items-center justify-between rounded-2xl border border-white/8 bg-white/5 px-4 py-3 text-sm text-zinc-300 transition hover:bg-white/10"
               >
-                <span class="font-medium text-white">{game_id}</span>
-                <span class="text-zinc-400">Join game</span>
+                <span class="flex items-center gap-2 font-medium text-white">
+                  <span>{game.id}</span>
+                  <span
+                    :if={game.mode == :vs_ai}
+                    class="rounded-full border border-sky-300/30 bg-sky-300/10 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-sky-100"
+                  >
+                    AI
+                  </span>
+                </span>
+                <span class="text-zinc-400">{if game.full?, do: "View game", else: "Join game"}</span>
               </.link>
               <div
                 :if={@recent_games == []}
