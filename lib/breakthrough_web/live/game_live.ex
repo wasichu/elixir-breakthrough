@@ -120,14 +120,14 @@ defmodule BreakthroughWeb.GameLive do
   end
 
   @impl true
-  def handle_info({:game_expired, :inactive}, socket) do
+  def handle_info({:game_expired, reason}, socket) do
     {:noreply,
      socket
      |> clear_local_selection()
      |> assign(
        game_expired: true,
        phase: "Expired",
-       disconnect_notice: "Both players left. This game expired.",
+       disconnect_notice: game_expired_message(reason),
        can_interact?: false
      )}
   end
@@ -612,6 +612,11 @@ defmodule BreakthroughWeb.GameLive do
        do: MapSet.member?(rematch_votes, player_side)
 
   defp show_rematch_pending?(_game, _player_side, _rematch_votes), do: false
+
+  defp game_expired_message(:inactive), do: "Both players left. This game expired."
+  defp game_expired_message(:unstarted), do: "No move was made in time. This game expired."
+  defp game_expired_message(:stalled), do: "No move was made for 20 minutes. This game expired."
+  defp game_expired_message(_reason), do: "This game expired."
 
   defp board_prompt(%{winner: winner}, player_side) when winner in [:white, :black] do
     cond do

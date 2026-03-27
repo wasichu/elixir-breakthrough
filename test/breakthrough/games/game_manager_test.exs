@@ -236,6 +236,41 @@ defmodule Breakthrough.Games.GameManagerTest do
     end)
   end
 
+  test "games expire after no move activity for the configured timeout" do
+    game_id = "expire-stalled-" <> Integer.to_string(System.unique_integer([:positive]))
+
+    {:ok, ^game_id} =
+      GameManager.create_game(id: game_id, move_timeout_ms: 20)
+
+    {:ok, :white, _state} = GameManager.join_game(game_id, "stalled-white")
+    {:ok, :black, _state} = GameManager.join_game(game_id, "stalled-black")
+    assert {:ok, _state} = GameManager.make_move(game_id, "stalled-white", {7, 1}, {6, 1})
+
+    assert_eventually(fn ->
+      assert Registry.lookup(Breakthrough.Games.Registry, game_id) == []
+      snapshot = GameManager.lobby_snapshot()
+      refute Enum.any?(snapshot.recent_games, &(&1.id == game_id))
+    end)
+  end
+
+  test "a new move resets the move inactivity timeout" do
+    game_id = "expire-stalled-reset-" <> Integer.to_string(System.unique_integer([:positive]))
+
+    {:ok, ^game_id} =
+      GameManager.create_game(id: game_id, move_timeout_ms: 30)
+
+    {:ok, :white, _state} = GameManager.join_game(game_id, "stalled-reset-white")
+    {:ok, :black, _state} = GameManager.join_game(game_id, "stalled-reset-black")
+    assert {:ok, _state} = GameManager.make_move(game_id, "stalled-reset-white", {7, 1}, {6, 1})
+
+    Process.sleep(15)
+    assert {:ok, _state} = GameManager.make_move(game_id, "stalled-reset-black", {2, 1}, {3, 1})
+    Process.sleep(20)
+
+    assert {:ok, state} = GameManager.get_state(game_id)
+    assert length(state.game.move_history) == 2
+  end
+
   defp assert_eventually(fun, attempts \\ 100)
 
   defp assert_eventually(fun, 1), do: fun.()

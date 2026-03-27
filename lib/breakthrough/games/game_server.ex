@@ -8,9 +8,11 @@ defmodule Breakthrough.Games.GameServer do
 
   @cleanup_reason :inactive
   @ready_cleanup_reason :unstarted
+  @move_cleanup_reason :stalled
   @default_pvp_cleanup_timeout_ms 10_000
   @default_ai_cleanup_timeout_ms 5_000
   @default_pvp_ready_timeout_ms 60_000
+  @default_move_timeout_ms 1_200_000
   @ai_token :ai
   @ai_player :black
 
@@ -19,6 +21,7 @@ defmodule Breakthrough.Games.GameServer do
     mode = Keyword.get(opts, :mode, :pvp)
     cleanup_timeout_ms = Keyword.get(opts, :cleanup_timeout_ms, default_cleanup_timeout_ms(mode))
     ready_timeout_ms = Keyword.get(opts, :ready_timeout_ms, default_ready_timeout_ms(mode))
+    move_timeout_ms = Keyword.get(opts, :move_timeout_ms, @default_move_timeout_ms)
     ai_strategy = Keyword.get(opts, :ai_strategy, ScoredStrategy)
     players = Keyword.get(opts, :players)
 
@@ -29,6 +32,7 @@ defmodule Breakthrough.Games.GameServer do
         mode: mode,
         cleanup_timeout_ms: cleanup_timeout_ms,
         ready_timeout_ms: ready_timeout_ms,
+        move_timeout_ms: move_timeout_ms,
         ai_strategy: ai_strategy,
         players: players
       },
@@ -70,6 +74,7 @@ defmodule Breakthrough.Games.GameServer do
         mode: mode,
         cleanup_timeout_ms: cleanup_timeout_ms,
         ready_timeout_ms: ready_timeout_ms,
+        move_timeout_ms: move_timeout_ms,
         ai_strategy: ai_strategy,
         players: players
       }) do
@@ -83,6 +88,8 @@ defmodule Breakthrough.Games.GameServer do
       cleanup_timer_ref: nil,
       ready_timeout_ms: ready_timeout_ms,
       ready_timer_ref: nil,
+      move_timeout_ms: move_timeout_ms,
+      move_timer_ref: nil,
       connections: %{},
       ai_strategy: ai_strategy,
       rematch_votes: MapSet.new()
@@ -154,6 +161,7 @@ defmodule Breakthrough.Games.GameServer do
         %{state | game: next_game, rematch_votes: MapSet.new()}
         |> cancel_ready_timeout()
         |> maybe_trigger_ai()
+        |> restart_move_timeout()
 
       broadcast_state(next_state)
       {:reply, {:ok, public_state(next_state)}, next_state}
@@ -170,6 +178,7 @@ defmodule Breakthrough.Games.GameServer do
       next_state =
         %{state | game: next_game, rematch_votes: MapSet.new()}
         |> cancel_ready_timeout()
+        |> cancel_move_timeout()
 
       broadcast_state(next_state)
       {:reply, {:ok, public_state(next_state)}, next_state}
@@ -185,6 +194,7 @@ defmodule Breakthrough.Games.GameServer do
       |> Map.put(:game, Game.new())
       |> Map.put(:rematch_votes, MapSet.new())
       |> cancel_ready_timeout()
+      |> cancel_move_timeout()
       |> maybe_trigger_ai()
       |> maybe_schedule_ready_timeout()
       |> cancel_cleanup_if_needed()
@@ -235,6 +245,23 @@ defmodule Breakthrough.Games.GameServer do
         Breakthrough.PubSub,
         topic(state.id),
         {:game_expired, @ready_cleanup_reason}
+      )
+
+      GameTracker.track_game_stopped(state.id)
+      {:stop, :normal, state}
+    else
+      {:noreply, state}
+    end
+  end
+
+  def handle_info(:expire_if_stalled, state) do
+    state = %{state | move_timer_ref: nil}
+
+    if should_expire_for_move_inactivity?(state) do
+      Phoenix.PubSub.broadcast(
+        Breakthrough.PubSub,
+        topic(state.id),
+        {:game_expired, @move_cleanup_reason}
       )
 
       GameTracker.track_game_stopped(state.id)
@@ -403,6 +430,31 @@ defmodule Breakthrough.Games.GameServer do
     end
   end
 
+  defp restart_move_timeout(state) do
+    state
+    |> cancel_move_timeout()
+    |> maybe_schedule_move_timeout()
+  end
+
+  defp maybe_schedule_move_timeout(state) do
+    cond do
+      state.move_timeout_ms <= 0 ->
+        state
+
+      state.move_timer_ref ->
+        state
+
+      should_expire_for_move_inactivity?(state) ->
+        %{
+          state
+          | move_timer_ref: Process.send_after(self(), :expire_if_stalled, state.move_timeout_ms)
+        }
+
+      true ->
+        state
+    end
+  end
+
   defp cancel_cleanup_if_needed(state) do
     if state.cleanup_timer_ref && not should_expire?(state) do
       Process.cancel_timer(state.cleanup_timer_ref)
@@ -419,6 +471,13 @@ defmodule Breakthrough.Games.GameServer do
     %{state | ready_timer_ref: nil}
   end
 
+  defp cancel_move_timeout(%{move_timer_ref: nil} = state), do: state
+
+  defp cancel_move_timeout(state) do
+    Process.cancel_timer(state.move_timer_ref)
+    %{state | move_timer_ref: nil}
+  end
+
   defp should_expire?(state) do
     case state.mode do
       :vs_ai -> ai_game_abandoned?(state)
@@ -428,6 +487,10 @@ defmodule Breakthrough.Games.GameServer do
 
   defp should_expire_unstarted?(state) do
     state.mode == :pvp and not started_game?(state.game) and both_human_seats_claimed?(state)
+  end
+
+  defp should_expire_for_move_inactivity?(state) do
+    started_game?(state.game) and state.game.status != :finished
   end
 
   defp started_game?(%{move_history: move_history}), do: move_history != []

@@ -9,6 +9,7 @@ defmodule Breakthrough.Games.GameManager do
     mode = Keyword.get(opts, :mode, :pvp)
     cleanup_timeout_ms = Keyword.get(opts, :cleanup_timeout_ms)
     ready_timeout_ms = Keyword.get(opts, :ready_timeout_ms)
+    move_timeout_ms = Keyword.get(opts, :move_timeout_ms)
     ai_strategy = Keyword.get(opts, :ai_strategy)
     players = Keyword.get(opts, :players)
 
@@ -16,6 +17,7 @@ defmodule Breakthrough.Games.GameManager do
       [mode: mode]
       |> maybe_put_cleanup_timeout(cleanup_timeout_ms)
       |> maybe_put_ready_timeout(ready_timeout_ms)
+      |> maybe_put_move_timeout(move_timeout_ms)
       |> maybe_put_ai_strategy(ai_strategy)
       |> maybe_put_players(players)
 
@@ -28,6 +30,7 @@ defmodule Breakthrough.Games.GameManager do
     mode = Keyword.get(opts, :mode, :pvp)
     cleanup_timeout_ms = Keyword.get(opts, :cleanup_timeout_ms)
     ready_timeout_ms = Keyword.get(opts, :ready_timeout_ms)
+    move_timeout_ms = Keyword.get(opts, :move_timeout_ms)
     ai_strategy = Keyword.get(opts, :ai_strategy)
     players = Keyword.get(opts, :players)
 
@@ -40,6 +43,7 @@ defmodule Breakthrough.Games.GameManager do
           [id: game_id, mode: mode]
           |> maybe_put_cleanup_timeout(cleanup_timeout_ms)
           |> maybe_put_ready_timeout(ready_timeout_ms)
+          |> maybe_put_move_timeout(move_timeout_ms)
           |> maybe_put_ai_strategy(ai_strategy)
           |> maybe_put_players(players)
           |> then(&{GameServer, &1})
@@ -127,6 +131,11 @@ defmodule Breakthrough.Games.GameManager do
 
   defp maybe_put_ready_timeout(opts, ready_timeout_ms),
     do: Keyword.put(opts, :ready_timeout_ms, ready_timeout_ms)
+
+  defp maybe_put_move_timeout(opts, nil), do: opts
+
+  defp maybe_put_move_timeout(opts, move_timeout_ms),
+    do: Keyword.put(opts, :move_timeout_ms, move_timeout_ms)
 
   defp maybe_put_ai_strategy(opts, nil), do: opts
   defp maybe_put_ai_strategy(opts, ai_strategy), do: Keyword.put(opts, :ai_strategy, ai_strategy)
