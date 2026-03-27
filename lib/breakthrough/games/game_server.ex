@@ -178,7 +178,7 @@ defmodule Breakthrough.Games.GameServer do
       next_state =
         %{state | game: next_game, rematch_votes: MapSet.new()}
         |> cancel_ready_timeout()
-        |> cancel_move_timeout()
+        |> restart_move_timeout()
 
       broadcast_state(next_state)
       {:reply, {:ok, public_state(next_state)}, next_state}
@@ -490,7 +490,7 @@ defmodule Breakthrough.Games.GameServer do
   end
 
   defp should_expire_for_move_inactivity?(state) do
-    started_game?(state.game) and state.game.status != :finished
+    started_game?(state.game)
   end
 
   defp started_game?(%{move_history: move_history}), do: move_history != []

@@ -271,6 +271,24 @@ defmodule Breakthrough.Games.GameManagerTest do
     assert length(state.game.move_history) == 2
   end
 
+  test "finished games also expire after the inactivity timeout" do
+    game_id = "expire-finished-" <> Integer.to_string(System.unique_integer([:positive]))
+
+    {:ok, ^game_id} =
+      GameManager.create_game(id: game_id, move_timeout_ms: 20)
+
+    {:ok, :white, _state} = GameManager.join_game(game_id, "finished-white")
+    {:ok, :black, _state} = GameManager.join_game(game_id, "finished-black")
+    assert {:ok, _state} = GameManager.make_move(game_id, "finished-white", {7, 1}, {6, 1})
+    assert {:ok, _state} = GameManager.resign(game_id, "finished-black")
+
+    assert_eventually(fn ->
+      assert Registry.lookup(Breakthrough.Games.Registry, game_id) == []
+      snapshot = GameManager.lobby_snapshot()
+      refute Enum.any?(snapshot.recent_games, &(&1.id == game_id))
+    end)
+  end
+
   defp assert_eventually(fun, attempts \\ 100)
 
   defp assert_eventually(fun, 1), do: fun.()
