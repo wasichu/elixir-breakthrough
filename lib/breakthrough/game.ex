@@ -50,6 +50,25 @@ defmodule Breakthrough.Game do
     end
   end
 
+  @spec available_moves(t(), player()) :: [%{from: coord(), to: coord()}]
+  def available_moves(game, player) do
+    if game.winner || game.current_player != player do
+      []
+    else
+      game.board
+      |> Enum.reduce([], fn
+        {from, ^player}, moves ->
+          legal_moves(game, from)
+          |> Enum.map(&%{from: from, to: &1})
+          |> Kernel.++(moves)
+
+        _, moves ->
+          moves
+      end)
+      |> Enum.reverse()
+    end
+  end
+
   @spec move(t(), coord(), coord()) :: {:ok, t()} | {:error, :invalid_move | :game_over}
   def move(%{winner: winner}, _from, _to) when winner in [:white, :black],
     do: {:error, :game_over}

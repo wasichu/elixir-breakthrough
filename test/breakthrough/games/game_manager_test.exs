@@ -46,6 +46,28 @@ defmodule Breakthrough.Games.GameManagerTest do
     assert state.game.status == :finished
   end
 
+  test "vs_ai games reserve black for the ai and apply the ai move after white moves" do
+    game_id = "ai-" <> Integer.to_string(System.unique_integer([:positive]))
+
+    {:ok, ^game_id} =
+      GameManager.create_game(
+        id: game_id,
+        mode: :vs_ai,
+        ai_strategy: Breakthrough.TestSupport.FixedAIStrategy
+      )
+
+    assert {:ok, :white, state} = GameManager.join_game(game_id, "token-white")
+    assert state.players.black == :ai
+
+    assert {:ok, state} = GameManager.make_move(game_id, "token-white", {7, 1}, {6, 1})
+    assert state.game.current_player == :white
+
+    assert state.game.move_history == [
+             %{from: {7, 1}, to: {6, 1}, player: :white, capture?: false},
+             %{from: {2, 1}, to: {3, 1}, player: :black, capture?: false}
+           ]
+  end
+
   test "lobby snapshot tracks active and recent games" do
     game_id = "lobby-" <> Integer.to_string(System.unique_integer([:positive]))
 

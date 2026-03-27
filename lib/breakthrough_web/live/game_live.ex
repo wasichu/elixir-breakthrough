@@ -127,6 +127,9 @@ defmodule BreakthroughWeb.GameLive do
               <p class="max-w-2xl text-sm leading-7 text-zinc-300 sm:text-base">
                 The server owns the game state. Your browser only keeps local selection and highlight state.
               </p>
+              <p :if={@mode == :vs_ai} class="text-sm font-medium text-sky-100">
+                You are playing against the computer.
+              </p>
             </div>
           </div>
 
@@ -451,6 +454,7 @@ defmodule BreakthroughWeb.GameLive do
     end)
   end
 
+  defp seat_status(:ai, _current_token, _connected?), do: "AI"
   defp seat_status(nil, _current_token, _connected?), do: "Open"
   defp seat_status(token, token, _connected?), do: "You"
   defp seat_status(_token, _current_token, true), do: "Claimed"
@@ -501,7 +505,7 @@ defmodule BreakthroughWeb.GameLive do
   defp disconnect_notice(%{players: players, player_presence: player_presence, game: game}) do
     disconnected_players =
       [:white, :black]
-      |> Enum.filter(fn side -> players[side] != nil and not player_presence[side] end)
+      |> Enum.filter(fn side -> human_player?(players[side]) and not player_presence[side] end)
 
     case disconnected_players do
       [] ->
@@ -528,6 +532,9 @@ defmodule BreakthroughWeb.GameLive do
   defp show_resign_button?(%{status: status}, player_side) do
     status == :in_progress and player_side in [:white, :black]
   end
+
+  defp human_player?(player_token) when is_binary(player_token), do: true
+  defp human_player?(_player_token), do: false
 
   defp accessible_label({row, col}, nil), do: "Empty square #{file_label(col)}#{row}"
 

@@ -3,19 +3,23 @@ defmodule Breakthrough.Games.GameServer do
   use GenServer, restart: :transient
 
   alias Breakthrough.Game
+  alias Breakthrough.GameAI.RandomStrategy
   alias Breakthrough.Games.GameTracker
 
   @cleanup_reason :inactive
   @default_cleanup_timeout_ms 5_000
+  @ai_token :ai
+  @ai_player :black
 
   def start_link(opts) do
     id = Keyword.fetch!(opts, :id)
     mode = Keyword.get(opts, :mode, :pvp)
     cleanup_timeout_ms = Keyword.get(opts, :cleanup_timeout_ms, @default_cleanup_timeout_ms)
+    ai_strategy = Keyword.get(opts, :ai_strategy, RandomStrategy)
 
     GenServer.start_link(
       __MODULE__,
-      %{id: id, mode: mode, cleanup_timeout_ms: cleanup_timeout_ms},
+      %{id: id, mode: mode, cleanup_timeout_ms: cleanup_timeout_ms, ai_strategy: ai_strategy},
       name: via_tuple(id)
     )
   end
@@ -45,17 +49,23 @@ defmodule Breakthrough.Games.GameServer do
   def set_mode(game_id, mode), do: GenServer.call(via_tuple(game_id), {:set_mode, mode})
 
   @impl true
-  def init(%{id: id, mode: mode, cleanup_timeout_ms: cleanup_timeout_ms}) do
+  def init(%{
+        id: id,
+        mode: mode,
+        cleanup_timeout_ms: cleanup_timeout_ms,
+        ai_strategy: ai_strategy
+      }) do
     {:ok,
      %{
        id: id,
        game: Game.new(),
        mode: mode,
-       players: %{white: nil, black: nil},
+       players: initial_players(mode),
        spectators: MapSet.new(),
        cleanup_timeout_ms: cleanup_timeout_ms,
        cleanup_timer_ref: nil,
-       connections: %{}
+       connections: %{},
+       ai_strategy: ai_strategy
      }}
   end
 
@@ -215,7 +225,24 @@ defmodule Breakthrough.Games.GameServer do
   defp ensure_turn(_game, _side), do: {:error, :not_your_turn}
 
   defp maybe_trigger_ai(%{mode: :vs_ai} = state) do
-    state
+    with true <- state.game.current_player == @ai_player,
+         :ok <- ensure_active_game(state.game),
+         {:ok, %{from: from, to: to}} <- state.ai_strategy.choose_move(state.game, @ai_player),
+         {:ok, next_game} <- Game.move(state.game, from, to) do
+      %{state | game: next_game}
+    else
+      false ->
+        state
+
+      {:error, :no_legal_moves} ->
+        %{
+          state
+          | game: %{state.game | winner: :white, status: :finished}
+        }
+
+      {:error, :game_over} ->
+        state
+    end
   end
 
   defp maybe_trigger_ai(state), do: state
@@ -247,14 +274,17 @@ defmodule Breakthrough.Games.GameServer do
   end
 
   defp should_expire?(state) do
-    started_game?(state.game) and not player_connected?(state, :white) and
-      not player_connected?(state, :black)
+    started_game?(state.game) and human_players_disconnected?(state)
   end
 
   defp started_game?(%{move_history: move_history}), do: move_history != []
 
   defp player_connected?(state, side) when side in [:white, :black] do
-    Enum.any?(state.connections, fn {_pid, connection} -> connection.side == side end)
+    if state.players[side] == @ai_token do
+      true
+    else
+      Enum.any?(state.connections, fn {_pid, connection} -> connection.side == side end)
+    end
   end
 
   defp spectator_count(state) do
@@ -275,6 +305,15 @@ defmodule Breakthrough.Games.GameServer do
       black: player_connected?(state, :black)
     }
   end
+
+  defp human_players_disconnected?(state) do
+    [:white, :black]
+    |> Enum.filter(fn side -> is_binary(state.players[side]) end)
+    |> Enum.all?(fn side -> not player_connected?(state, side) end)
+  end
+
+  defp initial_players(:vs_ai), do: %{white: nil, black: @ai_token}
+  defp initial_players(_mode), do: %{white: nil, black: nil}
 
   defp public_state(state) do
     %{

@@ -21,6 +21,11 @@ defmodule BreakthroughWeb.HomeLive do
     {:noreply, push_navigate(socket, to: ~p"/games/#{game_id}")}
   end
 
+  def handle_event("new-ai-game", _params, socket) do
+    {:ok, game_id} = GameManager.create_game(mode: :vs_ai)
+    {:noreply, push_navigate(socket, to: ~p"/games/#{game_id}")}
+  end
+
   @impl true
   def handle_info({:lobby_updated, snapshot}, socket) do
     {:noreply, assign_lobby_snapshot(socket, snapshot)}
@@ -41,14 +46,24 @@ defmodule BreakthroughWeb.HomeLive do
           <p class="max-w-2xl text-sm leading-7 text-zinc-300 sm:text-base">
             The first visitor joins as White, the second joins as Black, and everyone after that watches as a spectator.
           </p>
-          <button
-            id="create-game-button"
-            type="button"
-            phx-click="new-game"
-            class="inline-flex items-center gap-2 rounded-full border border-amber-300/40 bg-amber-300/10 px-5 py-3 text-sm font-semibold text-amber-100 transition hover:border-amber-200 hover:bg-amber-300/20"
-          >
-            <.icon name="hero-plus" class="size-4" /> New Game
-          </button>
+          <div class="flex flex-wrap gap-3">
+            <button
+              id="create-game-button"
+              type="button"
+              phx-click="new-game"
+              class="inline-flex items-center gap-2 rounded-full border border-amber-300/40 bg-amber-300/10 px-5 py-3 text-sm font-semibold text-amber-100 transition hover:border-amber-200 hover:bg-amber-300/20"
+            >
+              <.icon name="hero-user-group" class="size-4" /> New Multiplayer Game
+            </button>
+            <button
+              id="create-ai-game-button"
+              type="button"
+              phx-click="new-ai-game"
+              class="inline-flex items-center gap-2 rounded-full border border-sky-300/40 bg-sky-300/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:border-sky-200 hover:bg-sky-300/20"
+            >
+              <.icon name="hero-cpu-chip" class="size-4" /> Play vs AI
+            </button>
+          </div>
         </section>
 
         <div class="space-y-4">

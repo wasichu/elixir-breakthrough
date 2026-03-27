@@ -7,6 +7,7 @@ defmodule BreakthroughWeb.GameLiveTest do
     {:ok, view, _html} = live(conn, ~p"/")
 
     assert has_element?(view, "#create-game-button")
+    assert has_element?(view, "#create-ai-game-button")
   end
 
   test "clicking new game redirects to a unique game url", %{conn: conn} do
@@ -14,6 +15,17 @@ defmodule BreakthroughWeb.GameLiveTest do
 
     view
     |> element("#create-game-button")
+    |> render_click()
+
+    {path, _flash} = assert_redirect(view)
+    assert path =~ ~r"^/games/[A-Za-z0-9_-]+$"
+  end
+
+  test "clicking play vs ai redirects to a unique game url", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/")
+
+    view
+    |> element("#create-ai-game-button")
     |> render_click()
 
     {path, _flash} = assert_redirect(view)
@@ -242,6 +254,38 @@ defmodule BreakthroughWeb.GameLiveTest do
     assert has_element?(white_view, "#phase-value[data-phase='Black wins']")
     assert has_element?(black_view, "#phase-value[data-phase='Black wins']")
     refute has_element?(white_view, "#resign-game-button")
+  end
+
+  test "vs ai games show the ai seat and process an ai reply move", %{conn: conn} do
+    game_id = "ai-live-" <> Integer.to_string(System.unique_integer([:positive]))
+
+    {:ok, ^game_id} =
+      Breakthrough.Games.GameManager.create_game(
+        id: game_id,
+        mode: :vs_ai,
+        ai_strategy: Breakthrough.TestSupport.FixedAIStrategy
+      )
+
+    {:ok, view, _html} = live(conn, ~p"/games/#{game_id}")
+
+    assert has_element?(view, "#player-side-value[data-side='white']")
+    assert has_element?(view, "#black-seat-status", "Black: AI")
+    refute has_element?(view, "#resign-game-button")
+
+    view
+    |> element("#square-a7")
+    |> render_click()
+
+    view
+    |> element("#square-a6")
+    |> render_click()
+
+    assert has_element?(view, "#resign-game-button")
+    assert has_element?(view, "#square-a7[data-last-move='false']")
+    assert has_element?(view, "#square-a6[data-last-move='false']")
+    assert has_element?(view, "#square-a2[data-last-move='true']")
+    assert has_element?(view, "#square-a3[data-last-move='true']")
+    assert has_element?(view, "#turn-value[data-turn='White']")
   end
 
   defp assert_eventually(fun, attempts \\ 100)
