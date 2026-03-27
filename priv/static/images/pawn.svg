@@ -1,0 +1,48 @@
+<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="pawn-body" x1="48" y1="12" x2="48" y2="84" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF9EE" />
+      <stop offset="0.48" stop-color="#F1E4CF" />
+      <stop offset="1" stop-color="#C7B08A" />
+    </linearGradient>
+    <linearGradient id="pawn-base" x1="48" y1="58" x2="48" y2="84" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E4CFAD" />
+      <stop offset="1" stop-color="#A78860" />
+    </linearGradient>
+  </defs>
+
+  <circle cx="48" cy="19" r="11" fill="url(#pawn-body)" />
+  <path
+    d="M48 32C37.5066 32 29 40.5066 29 51V58H24C19.5817 58 16 61.5817 16 66V73C16 77.4183 19.5817 81 24 81H72C76.4183 81 80 77.4183 80 73V66C80 61.5817 76.4183 58 72 58H67V51C67 40.5066 58.4934 32 48 32Z"
+    fill="url(#pawn-body)"
+  />
+  <path
+    d="M29 58H67V66C67 69.866 63.866 73 60 73H36C32.134 73 29 69.866 29 66V58Z"
+    fill="url(#pawn-base)"
+  />
+  <path
+    d="M34 48C34 39.1634 40.268 34 48 34C55.732 34 62 39.1634 62 48V58H34V48Z"
+    fill="#FFFDF8"
+    fill-opacity="0.24"
+  />
+  <path
+    d="M25 81H71"
+    stroke="#8A6E47"
+    stroke-width="4"
+    stroke-linecap="round"
+  />
+  <path
+    d="M48 9C41.9249 9 37 13.9249 37 20"
+    stroke="#FFFFFF"
+    stroke-opacity="0.75"
+    stroke-width="4"
+    stroke-linecap="round"
+  />
+  <path
+    d="M48 32C37.5066 32 29 40.5066 29 51V58H24C19.5817 58 16 61.5817 16 66V73C16 77.4183 19.5817 81 24 81H72C76.4183 81 80 77.4183 80 73V66C80 61.5817 76.4183 58 72 58H67V51C67 40.5066 58.4934 32 48 32Z"
+    stroke="#7F6541"
+    stroke-width="4"
+    stroke-linejoin="round"
+  />
+  <circle cx="48" cy="19" r="11" stroke="#7F6541" stroke-width="4" />
+</svg>

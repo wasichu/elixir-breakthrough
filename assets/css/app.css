@@ -1,0 +1,46 @@
+@import "tailwindcss" source(none);
+@source "../css";
+@source "../js";
+@source "../../lib/breakthrough_web";
+@plugin "../vendor/heroicons";
+
+/* Add variants based on LiveView classes */
+@custom-variant phx-click-loading (.phx-click-loading&, .phx-click-loading &);
+@custom-variant phx-submit-loading (.phx-submit-loading&, .phx-submit-loading &);
+@custom-variant phx-change-loading (.phx-change-loading&, .phx-change-loading &);
+
+/* Make LiveView wrapper divs transparent for layout */
+[data-phx-session], [data-phx-teleported-src] { display: contents }
+
+:root {
+  color-scheme: dark;
+  --page-ink: #f5efe4;
+  --page-muted: #bdb2a3;
+  --page-panel: rgba(14, 14, 18, 0.58);
+  --page-line: rgba(255, 255, 255, 0.08);
+}
+
+html {
+  background:
+    radial-gradient(circle at top, rgba(196, 136, 56, 0.22), transparent 30%),
+    radial-gradient(circle at bottom left, rgba(115, 52, 34, 0.38), transparent 32%),
+    linear-gradient(180deg, #231a18 0%, #111215 42%, #0a0b0e 100%);
+}
+
+body {
+  min-height: 100vh;
+  color: var(--page-ink);
+  font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.04), transparent 18%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
+}
+
+body::selection {
+  background: rgba(251, 191, 36, 0.35);
+}
+
+.display-copy {
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  letter-spacing: -0.03em;
+}
