@@ -44,3 +44,17 @@ body::selection {
   font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
   letter-spacing: -0.03em;
 }
+
+#breakthrough-board.drag-active button[id^="square-"][data-own-piece="true"] {
+  cursor: grabbing;
+}
+
+.board-drag-ghost {
+  position: fixed;
+  width: 3.5rem;
+  height: 3.5rem;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  z-index: 80;
+  filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.45));
+}

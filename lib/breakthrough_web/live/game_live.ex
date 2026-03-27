@@ -189,7 +189,12 @@ defmodule BreakthroughWeb.GameLive do
                 <span :for={file <- @files}>{file}</span>
               </div>
 
-              <div id="breakthrough-board" class="space-y-2">
+              <div
+                id="breakthrough-board"
+                phx-hook="BoardDrag"
+                class="space-y-2"
+                data-can-drag={to_string(@can_interact?)}
+              >
                 <div
                   :for={row <- @board_rows}
                   class="grid grid-cols-[1.5rem_repeat(8,minmax(0,1fr))] gap-2"
@@ -206,9 +211,13 @@ defmodule BreakthroughWeb.GameLive do
                     phx-value-col={square.col}
                     aria-pressed={to_string(square.selected?)}
                     disabled={!@can_interact?}
+                    data-row={square.row}
+                    data-col={square.col}
                     data-selected={to_string(square.selected?)}
                     data-last-move={to_string(square.last_move?)}
                     data-occupied={to_string(square.piece != nil)}
+                    data-own-piece={to_string(square.piece == @player_side)}
+                    data-legal-move={to_string(square.legal_move?)}
                     data-piece={square.piece_code || "empty"}
                     class={[
                       "group aspect-square rounded-2xl border text-sm font-semibold transition duration-150 ease-out focus:outline-none focus:ring-2 focus:ring-amber-200/70",
