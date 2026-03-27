@@ -214,11 +214,24 @@ const hooks = {
       const piece = square.querySelector("img")
       if (!piece) return
 
-      this.ghost = piece.cloneNode(true)
+      this.ghost = document.createElement("img")
       this.ghost.id = "board-drag-ghost"
-      this.ghost.classList.add("board-drag-ghost")
+      this.ghost.src = piece.currentSrc || piece.src
+      this.ghost.alt = ""
+      this.ghost.setAttribute("aria-hidden", "true")
+      this.ghost.className = "board-drag-ghost"
+      this.applyGhostStyle(square.dataset.piece)
       document.body.appendChild(this.ghost)
       this.positionGhost(event.clientX, event.clientY)
+    },
+
+    applyGhostStyle(pieceCode) {
+      if (pieceCode === "B") {
+        this.ghost.style.filter =
+          "brightness(0.32) contrast(1.2) saturate(0) drop-shadow(0 1px 0 rgba(255,244,220,0.22))"
+      } else {
+        this.ghost.style.filter = "drop-shadow(0 1px 1px rgba(0,0,0,0.9))"
+      }
     },
 
     positionGhost(x, y) {
