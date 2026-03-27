@@ -275,6 +275,9 @@ defmodule BreakthroughWeb.GameLive do
                 <p id="phase-value" data-phase={@phase} class="mt-2 text-2xl text-white">
                   {@phase}
                 </p>
+                <p :if={@finish_notice} id="finish-note" class="mt-2 text-sm text-amber-100">
+                  {@finish_notice}
+                </p>
                 <p :if={@rematch_notice} id="rematch-note" class="mt-2 text-sm text-emerald-100">
                   {@rematch_notice}
                 </p>
@@ -428,7 +431,8 @@ defmodule BreakthroughWeb.GameLive do
       can_interact?:
         not socket.assigns[:game_expired] and
           can_interact?(state.game, player_side),
-      rematch_notice: rematch_notice(state),
+      finish_notice: finish_notice(state.game, player_side),
+      rematch_notice: rematch_notice(state, player_side),
       rematch_votes: state.rematch_votes,
       disconnect_notice: disconnect_notice(state),
       player_presence: state.player_presence,
@@ -600,17 +604,40 @@ defmodule BreakthroughWeb.GameLive do
 
   defp show_rematch_pending?(_game, _player_side, _rematch_votes), do: false
 
-  defp rematch_notice(%{mode: :pvp, game: %{status: :finished}, rematch_votes: rematch_votes}) do
+  defp finish_notice(%{finish_reason: {:resignation, resigning_side}}, player_side) do
+    cond do
+      player_side == resigning_side -> "You resigned."
+      player_side == opponent(resigning_side) -> "#{player_label(resigning_side)} resigned."
+      true -> "#{player_label(resigning_side)} resigned."
+    end
+  end
+
+  defp finish_notice(_game, _player_side), do: nil
+
+  defp rematch_notice(
+         %{mode: :pvp, game: %{status: :finished}, rematch_votes: rematch_votes},
+         player_side
+       ) do
     case MapSet.to_list(rematch_votes) do
-      [player_side] ->
-        "Waiting for #{player_label(opponent(player_side))} to accept rematch."
+      [requesting_side] ->
+        rematch_notice_for_player(requesting_side, player_side)
 
       _ ->
         nil
     end
   end
 
-  defp rematch_notice(_state), do: nil
+  defp rematch_notice(_state, _player_side), do: nil
+
+  defp rematch_notice_for_player(requesting_side, player_side) do
+    cond do
+      player_side == requesting_side ->
+        "Waiting for #{player_label(opponent(requesting_side))} to accept rematch."
+
+      true ->
+        "#{player_label(requesting_side)} requested a rematch."
+    end
+  end
 
   defp opponent(:white), do: :black
   defp opponent(:black), do: :white

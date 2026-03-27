@@ -16,7 +16,8 @@ defmodule Breakthrough.Game do
           current_player: player(),
           winner: player() | nil,
           move_history: [move()],
-          status: :not_started | :in_progress | :finished
+          status: :not_started | :in_progress | :finished,
+          finish_reason: nil | {:resignation, player()}
         }
 
   @spec new() :: t()
@@ -26,7 +27,8 @@ defmodule Breakthrough.Game do
       current_player: :white,
       winner: nil,
       move_history: [],
-      status: :not_started
+      status: :not_started,
+      finish_reason: nil
     }
   end
 
@@ -79,16 +81,18 @@ defmodule Breakthrough.Game do
       board = apply_move(game, from, to)
       winner = winning_player(game.current_player, board, to)
 
-      updated_game = %{
+      updated_game =
         game
-        | board: board,
-          current_player: next_player(game.current_player, winner),
-          winner: winner,
-          move_history:
-            game.move_history ++
-              [%{from: from, to: to, player: game.current_player, capture?: capture?}],
-          status: game_status(winner)
-      }
+        |> Map.put(:board, board)
+        |> Map.put(:current_player, next_player(game.current_player, winner))
+        |> Map.put(:winner, winner)
+        |> Map.put(
+          :move_history,
+          game.move_history ++
+            [%{from: from, to: to, player: game.current_player, capture?: capture?}]
+        )
+        |> Map.put(:status, game_status(winner))
+        |> Map.put(:finish_reason, nil)
 
       {:ok, updated_game}
     else
@@ -102,11 +106,10 @@ defmodule Breakthrough.Game do
 
   def resign(game, player) do
     {:ok,
-     %{
-       game
-       | winner: opponent(player),
-         status: :finished
-     }}
+     game
+     |> Map.put(:winner, opponent(player))
+     |> Map.put(:status, :finished)
+     |> Map.put(:finish_reason, {:resignation, player})}
   end
 
   defp do_legal_moves(game, {row, col}) do

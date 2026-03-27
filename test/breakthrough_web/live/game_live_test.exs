@@ -295,6 +295,8 @@ defmodule BreakthroughWeb.GameLiveTest do
 
     assert has_element?(white_view, "#phase-value[data-phase='You lost']")
     assert has_element?(black_view, "#phase-value[data-phase='You won']")
+    assert has_element?(white_view, "#finish-note", "You resigned.")
+    assert has_element?(black_view, "#finish-note", "White resigned.")
     refute has_element?(white_view, "#resign-game-button")
   end
 
@@ -361,6 +363,7 @@ defmodule BreakthroughWeb.GameLiveTest do
     assert has_element?(white_view, "#rematch-pending-indicator")
     assert has_element?(white_view, "#rematch-note", "Waiting for Black to accept rematch.")
     assert has_element?(black_view, "#rematch-game-button")
+    assert has_element?(black_view, "#rematch-note", "White requested a rematch.")
     refute_redirected(white_view)
     refute_redirected(black_view)
     refute_redirected(spectator_view)

@@ -9,6 +9,7 @@ defmodule Breakthrough.GameTest do
     assert game.current_player == :white
     assert game.winner == nil
     assert game.status == :not_started
+    assert game.finish_reason == nil
     assert game.move_history == []
 
     assert Game.piece_at(game, {1, 1}) == :black
@@ -42,6 +43,7 @@ defmodule Breakthrough.GameTest do
     assert moved_game.current_player == :black
     assert moved_game.status == :in_progress
     assert moved_game.winner == nil
+    assert moved_game.finish_reason == nil
 
     assert moved_game.move_history == [
              %{from: {7, 4}, to: {6, 4}, player: :white, capture?: false}
@@ -63,9 +65,20 @@ defmodule Breakthrough.GameTest do
     assert moved_game.winner == :white
     assert moved_game.status == :finished
     assert moved_game.current_player == :white
+    assert moved_game.finish_reason == nil
 
     assert moved_game.move_history == [
              %{from: {2, 4}, to: {1, 4}, player: :white, capture?: false}
            ]
+  end
+
+  test "resign/2 marks the finishing reason" do
+    game = Game.new()
+
+    assert {:ok, resigned_game} = Game.resign(game, :white)
+
+    assert resigned_game.winner == :black
+    assert resigned_game.status == :finished
+    assert resigned_game.finish_reason == {:resignation, :white}
   end
 end
