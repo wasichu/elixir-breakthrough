@@ -4,6 +4,7 @@ defmodule BreakthroughWeb.Router do
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
+    plug BreakthroughWeb.Plugs.EnsurePlayerToken
     plug :fetch_live_flash
     plug :put_root_layout, html: {BreakthroughWeb.Layouts, :root}
     plug :protect_from_forgery
@@ -17,7 +18,8 @@ defmodule BreakthroughWeb.Router do
   scope "/", BreakthroughWeb do
     pipe_through :browser
 
-    live "/", GameLive
+    live "/", HomeLive
+    live "/games/:id", GameLive
   end
 
   # Other scopes may use custom stacks.

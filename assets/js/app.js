@@ -25,11 +25,100 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/breakthrough"
 import topbar from "../vendor/topbar"
 
+const hooks = {
+  ShareLink: {
+    mounted() {
+      this.syncUrl()
+    },
+
+    syncUrl() {
+      const input = this.el.querySelector("#game-share-link")
+      const button = this.el.querySelector("#copy-link-button")
+      const shareUrl = new URL(this.el.dataset.shareUrl, window.location.origin)
+
+      if (shareUrl.hostname === "localhost" && window.location.hostname !== "localhost") {
+        shareUrl.protocol = window.location.protocol
+        shareUrl.hostname = window.location.hostname
+        shareUrl.port = window.location.port
+      } else {
+        shareUrl.protocol = window.location.protocol
+        shareUrl.hostname = window.location.hostname
+        shareUrl.port = window.location.port
+      }
+
+      const resolvedUrl = shareUrl.toString()
+
+      if (input) {
+        input.value = resolvedUrl
+      }
+
+      if (button) {
+        button.dataset.copyText = resolvedUrl
+      }
+    },
+  },
+
+  CopyText: {
+    mounted() {
+      const setLabel = (text) => {
+        const label = this.el.querySelector("span")
+        if (label) label.textContent = text
+      }
+
+      const resetLabel = () => {
+        window.setTimeout(() => setLabel("Copy"), 1200)
+      }
+
+      const fallbackCopy = (text) => {
+        const input = document.querySelector("#game-share-link")
+        if (input) {
+          input.focus()
+          input.select()
+          input.setSelectionRange(0, input.value.length)
+        }
+
+        const copied = document.execCommand("copy")
+        if (copied) {
+          setLabel("Copied")
+          resetLabel()
+        } else {
+          setLabel("Copy manually")
+        }
+      }
+
+      this.handleClick = async () => {
+        const target = this.el.dataset.copyTarget
+        const input = target ? document.querySelector(target) : null
+        const text = input?.value || this.el.dataset.copyText
+
+        try {
+          if (!navigator.clipboard || !window.isSecureContext) {
+            fallbackCopy(text)
+            return
+          }
+
+          await navigator.clipboard.writeText(text)
+          setLabel("Copied")
+          resetLabel()
+        } catch (_error) {
+          fallbackCopy(text)
+        }
+      }
+
+      this.el.addEventListener("click", this.handleClick)
+    },
+
+    destroyed() {
+      this.el.removeEventListener("click", this.handleClick)
+    }
+  },
+}
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks},
+  hooks: {...colocatedHooks, ...hooks},
 })
 
 // Show progress bar on live navigation and form submits
@@ -80,4 +169,3 @@ if (process.env.NODE_ENV === "development") {
     window.liveReloader = reloader
   })
 }
-

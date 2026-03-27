@@ -1,9 +1,6 @@
 defmodule Breakthrough.Game do
   @moduledoc """
-  Minimal game-state container for the v1 Breakthrough UI.
-
-  The rendering layer can depend on this module now, while the actual move
-  rules can be filled in later without replacing the homepage structure.
+  Pure domain logic for a Breakthrough game.
   """
 
   @board_size 8
@@ -12,25 +9,24 @@ defmodule Breakthrough.Game do
   @type player :: :white | :black
   @type coord :: {1..8, 1..8}
   @type piece :: player()
+  @type move :: %{from: coord(), to: coord(), player: player(), capture?: boolean()}
 
   @type t :: %{
           board: %{optional(coord()) => piece()},
-          current_turn: player(),
-          selected_square: coord() | nil,
+          current_player: player(),
           winner: player() | nil,
-          status: :not_started | :in_progress | :finished,
-          last_move: {coord(), coord()} | nil
+          move_history: [move()],
+          status: :not_started | :in_progress | :finished
         }
 
   @spec new() :: t()
   def new do
     %{
       board: starting_board(),
-      current_turn: :white,
-      selected_square: nil,
+      current_player: :white,
       winner: nil,
-      status: :not_started,
-      last_move: nil
+      move_history: [],
+      status: :not_started
     }
   end
 
@@ -43,99 +39,121 @@ defmodule Breakthrough.Game do
   @spec piece_at(t(), coord()) :: piece() | nil
   def piece_at(game, coord), do: Map.get(game.board, coord)
 
-  defp own_piece_at(game, coord) do
-    piece_at(game, coord) == game.current_turn
-  end
-
-  @spec select_square(t(), coord()) :: {:ok, t()} | {:error, :invalid_selection}
-  def select_square(game, coord) do
-    case piece_at(game, coord) do
-      player when player == game.current_turn ->
-        {:ok, %{game | selected_square: coord}}
+  @spec legal_moves(t(), coord()) :: [coord()]
+  def legal_moves(game, from) do
+    case piece_at(game, from) do
+      player when player == game.current_player and is_nil(game.winner) ->
+        do_legal_moves(game, from)
 
       _ ->
-        {:error, :invalid_selection}
+        []
     end
   end
 
-  @spec clear_selection(t()) :: t()
-  def clear_selection(game), do: %{game | selected_square: nil}
-
-  @spec legal_moves(t(), coord()) :: [coord()]
-  def legal_moves(game, coord) do
-    if own_piece_at(game, coord) do
-      do_legal_moves(game, coord)
-    else
-      []
-    end
-  end
-
-  defp do_legal_moves(game, {x, y}) do
-    white_to_move = game.current_turn == :white
-    new_row = if white_to_move, do: x - 1, else: x + 1
-
-    possible_moves = [
-      {new_row, y},
-      {new_row, y - 1},
-      {new_row, y + 1}
-    ]
-
-    Enum.filter(possible_moves, fn move -> valid_move(game, move) end)
-  end
-
-  defp valid_move(game, coord = {x, y}) do
-    valid_coord(x, y) and not own_piece_at(game, coord)
-  end
-
-  defp valid_coord(x, y) do
-    x >= 1 and x <= @board_size and y >= 1 and y <= @board_size
-  end
-
-  @spec move(t(), coord(), coord()) :: {:ok, t()} | {:error, :not_implemented}
-  def move(game, from, to) when from == to, do: {:ok, clear_selection(game)}
+  @spec move(t(), coord(), coord()) :: {:ok, t()} | {:error, :invalid_move | :game_over}
+  def move(%{winner: winner}, _from, _to) when winner in [:white, :black],
+    do: {:error, :game_over}
 
   def move(game, from, to) do
     if to in legal_moves(game, from) do
-      winner = winning_player(game, to)
-      status = if not is_nil(winner), do: :finished, else: :in_progress
+      capture? = capture_move?(game, from, to)
+      board = apply_move(game, from, to)
+      winner = winning_player(game.current_player, board, to)
 
-      {:ok,
-       %{
-         game
-         | current_turn: next_turn(game),
-           board: apply_move(game, from, to),
-           winner: winner,
-           status: status,
-           last_move: {from, to},
-           selected_square: nil
-       }}
+      updated_game = %{
+        game
+        | board: board,
+          current_player: next_player(game.current_player, winner),
+          winner: winner,
+          move_history:
+            game.move_history ++
+              [%{from: from, to: to, player: game.current_player, capture?: capture?}],
+          status: game_status(winner)
+      }
+
+      {:ok, updated_game}
     else
-      {:ok, clear_selection(game)}
+      {:error, :invalid_move}
     end
+  end
+
+  @spec resign(t(), player()) :: {:ok, t()} | {:error, :game_over}
+  def resign(%{winner: winner}, _player) when winner in [:white, :black],
+    do: {:error, :game_over}
+
+  def resign(game, player) do
+    {:ok,
+     %{
+       game
+       | winner: opponent(player),
+         status: :finished
+     }}
+  end
+
+  defp do_legal_moves(game, {row, col}) do
+    delta = if game.current_player == :white, do: -1, else: 1
+    next_row = row + delta
+
+    [
+      {next_row, col},
+      {next_row, col - 1},
+      {next_row, col + 1}
+    ]
+    |> Enum.filter(&valid_move(game, {row, col}, &1))
+  end
+
+  defp valid_move(game, {_from_row, from_col}, {to_row, to_col}) do
+    valid_coord(to_row, to_col) and
+      case piece_at(game, {to_row, to_col}) do
+        occupant when to_col == from_col ->
+          is_nil(occupant)
+
+        occupant ->
+          occupant != game.current_player
+      end
+  end
+
+  defp capture_move?(_game, {_from_row, from_col}, {_to_row, to_col}) when to_col == from_col,
+    do: false
+
+  defp capture_move?(game, _from, to) do
+    piece_at(game, to) == opponent(game.current_player)
   end
 
   defp apply_move(game, from, to) do
     game.board
     |> Map.delete(from)
-    |> Map.put(to, game.current_turn)
+    |> Map.put(to, game.current_player)
   end
 
-  @spec winning_player(t(), coord()) :: player() | nil
-  defp winning_player(game, {row, _col}) do
-    case {game.current_turn, row} do
-      {:white, 1} ->
+  defp winning_player(player, board, {row, _col}) do
+    cond do
+      player == :white and row == 1 ->
         :white
 
-      {:black, @board_size} ->
+      player == :black and row == @board_size ->
         :black
 
-      _ ->
+      Enum.any?(board, fn {_coord, occupant} -> occupant == opponent(player) end) ->
         nil
+
+      true ->
+        player
     end
   end
 
-  defp next_turn(%{current_turn: :white}), do: :black
-  defp next_turn(_game), do: :white
+  defp game_status(nil), do: :in_progress
+  defp game_status(_winner), do: :finished
+
+  defp next_player(current_player, nil), do: opponent(current_player)
+  defp next_player(current_player, _winner), do: current_player
+
+  defp opponent(:white), do: :black
+  defp opponent(:black), do: :white
+
+  defp valid_coord(row, col) do
+    row >= 1 and row <= @board_size and col >= 1 and col <= @board_size
+  end
 
   defp starting_board do
     white_pawns =

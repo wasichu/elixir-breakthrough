@@ -11,6 +11,9 @@ defmodule Breakthrough.Application do
       BreakthroughWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:breakthrough, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Breakthrough.PubSub},
+      {Registry, keys: :unique, name: Breakthrough.Games.Registry},
+      Breakthrough.Games.GameTracker,
+      Breakthrough.Games.GameSupervisor,
       # Start a worker by calling: Breakthrough.Worker.start_link(arg)
       # {Breakthrough.Worker, arg},
       # Start to serve requests, typically the last entry

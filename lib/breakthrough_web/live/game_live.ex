@@ -2,46 +2,112 @@ defmodule BreakthroughWeb.GameLive do
   use BreakthroughWeb, :live_view
 
   alias Breakthrough.Game
+  alias Breakthrough.Games.GameManager
+  alias Breakthrough.Games.GameServer
 
   @impl true
-  def mount(_params, _session, socket) do
-    {:ok,
-     socket
-     |> assign(:current_scope, nil)
-     |> assign_game(Game.new())}
+  def mount(%{"id" => game_id}, %{"player_token" => player_token}, socket) do
+    socket =
+      socket
+      |> assign(:current_scope, nil)
+      |> assign(:game_id, game_id)
+      |> assign(:player_token, player_token)
+
+    case GameManager.join_game(game_id, player_token) do
+      {:ok, player_side, state} ->
+        state =
+          if connected?(socket) do
+            Phoenix.PubSub.subscribe(Breakthrough.PubSub, GameServer.topic(game_id))
+            {:ok, state} = GameManager.track_connection(game_id, player_token, self())
+            state
+          else
+            state
+          end
+
+        {:ok,
+         socket
+         |> assign(:player_side, player_side)
+         |> assign(:selected_square, nil)
+         |> assign(:legal_targets, MapSet.new())
+         |> assign(:copy_status, "Copy")
+         |> assign(:game_expired, false)
+         |> assign_multiplayer_state(state)}
+
+      {:error, :not_found} ->
+        {:ok,
+         socket
+         |> put_flash(:error, "That game is no longer available.")
+         |> push_navigate(to: ~p"/")}
+    end
   end
 
   @impl true
-  def handle_event("new-game", _params, socket) do
-    {:noreply,
-     socket
-     |> assign_game(Game.new())
-     |> put_flash(:info, "Fresh board loaded. Move resolution is still a stub in v1.")}
-  end
-
   def handle_event("select-square", %{"row" => row, "col" => col}, socket) do
     coord = {String.to_integer(row), String.to_integer(col)}
-    game = socket.assigns.game
 
     socket =
-      case game.selected_square do
-        ^coord ->
+      cond do
+        socket.assigns.selected_square == coord ->
+          clear_local_selection(socket)
+
+        selectable_piece?(socket.assigns, coord) ->
+          select_square(socket, coord)
+
+        move_allowed?(socket.assigns, coord) ->
+          make_move(socket, coord)
+
+        should_clear_selection?(socket.assigns) ->
+          clear_local_selection(socket)
+
+        true ->
           socket
-          |> assign_game(Game.clear_selection(game))
-          |> clear_flash(:info)
-
-        nil ->
-          select_piece(socket, game, coord)
-
-        selected_square ->
-          if selectable_piece?(game, coord) do
-            select_piece(socket, game, coord)
-          else
-            attempt_move(socket, game, selected_square, coord)
-          end
       end
 
     {:noreply, socket}
+  end
+
+  def handle_event("resign-game", _params, socket) do
+    case GameManager.resign(socket.assigns.game_id, socket.assigns.player_token) do
+      {:ok, state} ->
+        {:noreply,
+         socket
+         |> clear_local_selection()
+         |> assign_multiplayer_state(state)}
+
+      {:error, :spectator} ->
+        {:noreply, put_flash(socket, :error, "Spectators cannot resign a game.")}
+
+      {:error, :game_over} ->
+        {:noreply, put_flash(socket, :error, "This game is already finished.")}
+
+      {:error, :not_found} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "That game is no longer available.")
+         |> push_navigate(to: ~p"/")}
+    end
+  end
+
+  @impl true
+  def handle_info({:game_updated, state}, socket) do
+    {:noreply,
+     socket
+     |> assign(:game_expired, false)
+     |> assign_multiplayer_state(state)
+     |> sync_local_selection()}
+  end
+
+  @impl true
+  def handle_info({:game_expired, :inactive}, socket) do
+    {:noreply,
+     socket
+     |> clear_local_selection()
+     |> assign(
+       game_expired: true,
+       phase: "Expired",
+       disconnect_notice: "Both players left. This game expired.",
+       can_interact?: false
+     )}
   end
 
   @impl true
@@ -52,14 +118,14 @@ defmodule BreakthroughWeb.GameLive do
         <section class="space-y-6">
           <div class="space-y-4">
             <p class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-zinc-300">
-              <span class="h-2 w-2 rounded-full bg-amber-300"></span> Breakthrough v1
+              <span class="h-2 w-2 rounded-full bg-emerald-300"></span> Breakthrough multiplayer
             </p>
             <div class="space-y-3">
               <h1 class="display-copy text-4xl text-white sm:text-5xl">
-                A playable shell for the board, without locking you into the rules yet.
+                Share the URL and play the same game from two browsers.
               </h1>
               <p class="max-w-2xl text-sm leading-7 text-zinc-300 sm:text-base">
-                The board, turn state, and square selection are wired. Legal move generation and win detection are intentionally left as stubs so you can implement them directly in the game module.
+                The server owns the game state. Your browser only keeps local selection and highlight state.
               </p>
             </div>
           </div>
@@ -74,16 +140,17 @@ defmodule BreakthroughWeb.GameLive do
                   Game Board
                 </p>
                 <p class="mt-1 text-sm text-zinc-300">
-                  White opens from the near side. Reach the opposite back rank or break the line.
+                  White and Black can join by URL. Extra visitors watch as spectators.
                 </p>
               </div>
               <button
-                id="new-game-button"
+                :if={show_resign_button?(@game, @player_side)}
+                id="resign-game-button"
                 type="button"
-                phx-click="new-game"
-                class="inline-flex items-center gap-2 rounded-full border border-amber-300/40 bg-amber-300/10 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:border-amber-200 hover:bg-amber-300/20"
+                phx-click="resign-game"
+                class="inline-flex items-center gap-2 rounded-full border border-rose-300/40 bg-rose-300/10 px-4 py-2 text-sm font-semibold text-rose-100 transition hover:border-rose-200 hover:bg-rose-300/20"
               >
-                <.icon name="hero-arrow-path" class="size-4" /> Reset
+                <.icon name="hero-flag" class="size-4" /> Resign
               </button>
             </div>
 
@@ -109,7 +176,9 @@ defmodule BreakthroughWeb.GameLive do
                     phx-value-row={square.row}
                     phx-value-col={square.col}
                     aria-pressed={to_string(square.selected?)}
+                    disabled={!@can_interact?}
                     data-selected={to_string(square.selected?)}
+                    data-last-move={to_string(square.last_move?)}
                     data-occupied={to_string(square.piece != nil)}
                     data-piece={square.piece_code || "empty"}
                     class={[
@@ -118,6 +187,8 @@ defmodule BreakthroughWeb.GameLive do
                         "border-amber-950/30 bg-[#9f7a50] text-stone-950 hover:bg-[#af8960]",
                       square.tone == :dark &&
                         "border-[#2d1f1a]/50 bg-[#5c4033] text-stone-100 hover:bg-[#6a4a3b]",
+                      square.last_move? &&
+                        "ring-2 ring-sky-300/70 ring-offset-0 shadow-[0_0_0_1px_rgba(125,211,252,0.25)]",
                       square.selected? &&
                         "scale-[0.96] border-amber-200 bg-amber-200 text-zinc-950 shadow-[0_0_0_1px_rgba(251,191,36,0.3)]",
                       square.legal_move? && "ring-2 ring-emerald-300/60 ring-offset-0"
@@ -158,64 +229,86 @@ defmodule BreakthroughWeb.GameLive do
                 <p id="phase-value" data-phase={@phase} class="mt-2 text-2xl text-white">
                   {@phase}
                 </p>
+                <p :if={@disconnect_notice} id="presence-note" class="mt-2 text-sm text-amber-100">
+                  {@disconnect_notice}
+                </p>
               </div>
               <span class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-emerald-300/25 bg-emerald-300/10 text-emerald-200">
-                <.icon name="hero-bolt" class="size-5" />
+                <.icon name="hero-users" class="size-5" />
               </span>
             </div>
 
             <dl class="mt-5 space-y-4 text-sm text-zinc-300">
               <div class="rounded-2xl border border-white/8 bg-black/20 p-4">
-                <dt class="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">Turn</dt>
-                <dd id="turn-value" data-turn={@turn} class="mt-1 text-lg text-white">{@turn}</dd>
-              </div>
-              <div
-                id="selected-piece-panel"
-                data-selected={@selected_square_id || "none"}
-                class="rounded-2xl border border-white/8 bg-black/20 p-4"
-              >
                 <dt class="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">
-                  Selected Square
+                  You Are
                 </dt>
-                <dd
-                  id="selected-square-value"
-                  data-selected={@selected_square_id || "none"}
-                  class="mt-1 text-lg text-white"
-                >
-                  {@selected_square_id || "None"}
+                <dd id="player-side-value" data-side={@player_side} class="mt-1 text-lg text-white">
+                  {@player_side_label}
                 </dd>
               </div>
               <div class="rounded-2xl border border-white/8 bg-black/20 p-4">
+                <dt class="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">Turn</dt>
+                <dd id="turn-value" data-turn={@turn} class="mt-1 text-lg text-white">{@turn}</dd>
+              </div>
+              <div class="rounded-2xl border border-white/8 bg-black/20 p-4">
                 <dt class="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">
-                  Legal Moves
+                  Share Link
                 </dt>
                 <dd
-                  id="legal-move-count"
-                  data-count={length(@legal_move_ids)}
-                  class="mt-1 text-lg text-white"
+                  id="share-link-panel"
+                  phx-hook="ShareLink"
+                  phx-update="ignore"
+                  data-share-url={@share_url}
+                  class="mt-2 space-y-3"
                 >
-                  {length(@legal_move_ids)}
+                  <input
+                    id="game-share-link"
+                    type="text"
+                    readonly
+                    value={@share_url}
+                    class="w-full rounded-xl border border-white/10 bg-zinc-950/80 px-3 py-2 text-sm text-amber-100"
+                  />
+                  <button
+                    id="copy-link-button"
+                    type="button"
+                    phx-hook="CopyText"
+                    data-copy-target="#game-share-link"
+                    class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-zinc-200 transition hover:bg-white/10"
+                  >
+                    <.icon name="hero-clipboard-document" class="size-4" />
+                    <span>{@copy_status}</span>
+                  </button>
                 </dd>
               </div>
             </dl>
           </section>
 
           <section
-            id="stub-notes-panel"
+            id="players-panel"
             class="rounded-[2rem] border border-white/10 bg-black/25 p-5 backdrop-blur"
           >
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">Stub Notes</p>
-            <ul class="mt-4 space-y-3 text-sm leading-6 text-zinc-300">
-              <li class="rounded-2xl border border-white/8 bg-white/5 px-4 py-3">
-                `Breakthrough.Game.legal_moves/2` currently returns an empty list.
-              </li>
-              <li class="rounded-2xl border border-white/8 bg-white/5 px-4 py-3">
-                `Breakthrough.Game.move/3` currently reports a not implemented error.
-              </li>
-              <li class="rounded-2xl border border-white/8 bg-white/5 px-4 py-3">
-                The LiveView is already wired to call those functions when you click from one square to another.
-              </li>
-            </ul>
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">Seats</p>
+            <div class="mt-4 space-y-3 text-sm text-zinc-300">
+              <div
+                id="white-seat-status"
+                class="rounded-2xl border border-white/8 bg-white/5 px-4 py-3"
+              >
+                White: {seat_status(@players.white, @player_token, @player_presence.white)}
+              </div>
+              <div
+                id="black-seat-status"
+                class="rounded-2xl border border-white/8 bg-white/5 px-4 py-3"
+              >
+                Black: {seat_status(@players.black, @player_token, @player_presence.black)}
+              </div>
+              <div id="spectator-count" class="rounded-2xl border border-white/8 bg-white/5 px-4 py-3">
+                Spectators: {@spectator_count}
+              </div>
+              <div class="rounded-2xl border border-white/8 bg-white/5 px-4 py-3">
+                Move history: {length(@game.move_history)}
+              </div>
+            </div>
           </section>
         </aside>
       </div>
@@ -223,55 +316,121 @@ defmodule BreakthroughWeb.GameLive do
     """
   end
 
-  defp select_piece(socket, game, coord) do
-    case Game.select_square(game, coord) do
-      {:ok, next_game} ->
+  defp make_move(socket, to) do
+    case GameManager.make_move(
+           socket.assigns.game_id,
+           socket.assigns.player_token,
+           socket.assigns.selected_square,
+           to
+         ) do
+      {:ok, state} ->
         socket
-        |> assign_game(next_game)
-        |> clear_flash(:info)
+        |> clear_local_selection()
+        |> assign_multiplayer_state(state)
 
-      {:error, :invalid_selection} ->
-        put_flash(socket, :info, "Select one of the current turn's pieces to start a move.")
+      {:error, :spectator} ->
+        put_flash(socket, :error, "Spectators cannot move pieces.")
+
+      {:error, :not_your_turn} ->
+        put_flash(socket, :error, "Wait for your turn.")
+
+      {:error, :invalid_move} ->
+        put_flash(socket, :error, "That move is not legal.")
+
+      {:error, :game_over} ->
+        put_flash(socket, :error, "This game is already finished.")
     end
   end
 
-  defp attempt_move(socket, game, from, to) do
-    case Game.move(game, from, to) do
-      {:ok, next_game} ->
-        socket
-        |> assign_game(next_game)
-        |> clear_flash(:info)
-    end
+  defp select_square(socket, coord) do
+    socket
+    |> assign(
+      selected_square: coord,
+      legal_targets: MapSet.new(Game.legal_moves(socket.assigns.game, coord))
+    )
+    |> assign_board_rows()
   end
 
-  defp assign_game(socket, game) do
-    legal_move_lookup =
-      case game.selected_square do
-        nil -> MapSet.new()
-        coord -> game |> Game.legal_moves(coord) |> MapSet.new()
-      end
+  defp clear_local_selection(socket) do
+    socket
+    |> assign(selected_square: nil, legal_targets: MapSet.new())
+    |> assign_board_rows()
+  end
 
+  defp assign_multiplayer_state(socket, state) do
     assign(socket,
-      game: game,
-      files: Enum.map(1..Game.board_size(), &file_label/1),
-      board_rows: board_rows(game, legal_move_lookup),
-      selected_square_id: maybe_square_id(game.selected_square),
-      legal_move_ids: Enum.map(legal_move_lookup, &square_id/1),
-      phase: phase_label(game),
-      turn: player_label(game.current_turn)
+      game: state.game,
+      players: state.players,
+      mode: state.mode,
+      files: file_labels(socket.assigns[:player_side] || :spectator),
+      board_rows:
+        board_rows(
+          state.game,
+          socket.assigns[:legal_targets] || MapSet.new(),
+          socket.assigns[:selected_square],
+          socket.assigns[:player_side] || :spectator
+        ),
+      selected_square_id: maybe_square_id(socket.assigns[:selected_square]),
+      phase: phase_label(state.game),
+      turn: player_label(state.game.current_player),
+      player_side_label: player_side_label(socket.assigns[:player_side] || :spectator),
+      can_interact?:
+        not socket.assigns[:game_expired] and
+          can_interact?(state.game, socket.assigns[:player_side] || :spectator),
+      disconnect_notice: disconnect_notice(state),
+      player_presence: state.player_presence,
+      spectator_count: state.spectator_count,
+      share_url: url(~p"/games/#{socket.assigns.game_id}")
     )
   end
 
-  defp selectable_piece?(game, coord) do
-    case Game.piece_at(game, coord) do
-      player when player in [:white, :black] -> player == game.current_turn
-      _ -> false
+  defp sync_local_selection(socket) do
+    selected_square = socket.assigns.selected_square
+
+    cond do
+      is_nil(selected_square) ->
+        assign_board_rows(socket)
+
+      not selectable_piece?(socket.assigns, selected_square) ->
+        socket |> clear_local_selection() |> assign_board_rows()
+
+      true ->
+        legal_targets = MapSet.new(Game.legal_moves(socket.assigns.game, selected_square))
+        assign(socket, legal_targets: legal_targets) |> assign_board_rows()
     end
   end
 
-  defp board_rows(game, legal_move_lookup) do
-    Enum.map(1..8, fn row ->
-      Enum.map(1..8, fn col ->
+  defp assign_board_rows(socket) do
+    assign(socket,
+      board_rows:
+        board_rows(
+          socket.assigns.game,
+          socket.assigns.legal_targets,
+          socket.assigns.selected_square,
+          socket.assigns.player_side
+        ),
+      selected_square_id: maybe_square_id(socket.assigns.selected_square)
+    )
+  end
+
+  defp selectable_piece?(assigns, coord) do
+    assigns.can_interact? and Game.piece_at(assigns.game, coord) == assigns.player_side
+  end
+
+  defp move_allowed?(assigns, coord) do
+    assigns.can_interact? and not is_nil(assigns.selected_square) and
+      MapSet.member?(assigns.legal_targets, coord)
+  end
+
+  defp should_clear_selection?(assigns) do
+    assigns.can_interact? and not is_nil(assigns.selected_square)
+  end
+
+  defp board_rows(game, legal_targets, selected_square, player_side) do
+    last_move_squares = last_move_squares(game)
+
+    Enum.map(row_order(player_side), fn row ->
+      Enum.map(col_order(player_side), fn col ->
         coord = {row, col}
         piece = Game.piece_at(game, coord)
 
@@ -279,33 +438,85 @@ defmodule BreakthroughWeb.GameLive do
           id: square_id(coord),
           row: row,
           col: col,
-          rank: Integer.to_string(display_rank(row)),
+          rank: Integer.to_string(display_rank(row, player_side)),
           piece: piece,
           piece_code: piece_code(piece),
           tone: square_tone(row, col),
-          selected?: game.selected_square == coord,
-          legal_move?: MapSet.member?(legal_move_lookup, coord),
+          last_move?: MapSet.member?(last_move_squares, coord),
+          selected?: selected_square == coord,
+          legal_move?: MapSet.member?(legal_targets, coord),
           accessible_label: accessible_label(coord, piece)
         }
       end)
     end)
   end
 
+  defp seat_status(nil, _current_token, _connected?), do: "Open"
+  defp seat_status(token, token, _connected?), do: "You"
+  defp seat_status(_token, _current_token, true), do: "Claimed"
+  defp seat_status(_token, _current_token, false), do: "Disconnected"
+
+  defp player_side_label(:white), do: "White"
+  defp player_side_label(:black), do: "Black"
+  defp player_side_label(:spectator), do: "Spectator"
+
   defp file_label(col), do: <<?a + col - 1>>
+  defp file_labels(:black), do: Enum.map(8..1//-1, &display_file_label(&1, :black))
+
+  defp file_labels(_player_side),
+    do: Enum.map(1..Game.board_size(), &display_file_label(&1, :white))
 
   defp square_tone(row, col) when rem(row + col, 2) == 0, do: :light
   defp square_tone(_row, _col), do: :dark
-  defp display_rank(row), do: Game.board_size() - row + 1
+  defp display_rank(row, :black), do: row
+  defp display_rank(row, _player_side), do: Game.board_size() - row + 1
+  defp display_file_label(col, :black), do: file_label(Game.board_size() - col + 1)
+  defp display_file_label(col, _player_side), do: file_label(col)
+  defp row_order(:black), do: 8..1//-1
+  defp row_order(_player_side), do: 1..8
+  defp col_order(:black), do: 8..1//-1
+  defp col_order(_player_side), do: 1..8
+  defp last_move_squares(%{move_history: []}), do: MapSet.new()
+
+  defp last_move_squares(%{move_history: move_history}) do
+    %{from: from, to: to} = List.last(move_history)
+    MapSet.new([from, to])
+  end
 
   defp square_id({row, col}), do: "#{file_label(col)}#{row}"
   defp maybe_square_id(nil), do: nil
   defp maybe_square_id(coord), do: square_id(coord)
+  defp can_interact?(%{winner: winner}, _player_side) when winner in [:white, :black], do: false
+
+  defp can_interact?(%{current_player: current_player}, player_side),
+    do: player_side in [:white, :black] and player_side == current_player
 
   defp phase_label(%{winner: winner}) when winner in [:white, :black],
     do: "#{player_label(winner)} wins"
 
   defp phase_label(%{status: :finished}), do: "Finished"
-  defp phase_label(_game), do: "Opening"
+  defp phase_label(%{status: :not_started}), do: "Waiting"
+  defp phase_label(_game), do: "In Progress"
+
+  defp disconnect_notice(%{players: players, player_presence: player_presence, game: game}) do
+    disconnected_players =
+      [:white, :black]
+      |> Enum.filter(fn side -> players[side] != nil and not player_presence[side] end)
+
+    case disconnected_players do
+      [] ->
+        nil
+
+      [side] ->
+        "#{player_label(side)} disconnected."
+
+      [_white, _black] when game.move_history != [] ->
+        "Both players disconnected. This game will expire in 5 seconds."
+
+      _both_open_or_unstarted ->
+        nil
+    end
+  end
 
   defp player_label(:white), do: "White"
   defp player_label(:black), do: "Black"
@@ -313,6 +524,10 @@ defmodule BreakthroughWeb.GameLive do
   defp piece_code(nil), do: nil
   defp piece_code(:white), do: "W"
   defp piece_code(:black), do: "B"
+
+  defp show_resign_button?(%{status: status}, player_side) do
+    status == :in_progress and player_side in [:white, :black]
+  end
 
   defp accessible_label({row, col}, nil), do: "Empty square #{file_label(col)}#{row}"
 
