@@ -142,24 +142,7 @@ defmodule BreakthroughWeb.GameLive do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
       <div id="game-shell" class="grid gap-8 lg:grid-cols-[minmax(0,1.25fr)_20rem]">
-        <section class="space-y-6">
-          <div class="space-y-4">
-            <p class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-zinc-300">
-              <span class="h-2 w-2 rounded-full bg-emerald-300"></span> Breakthrough multiplayer
-            </p>
-            <div class="space-y-3">
-              <h1 class="display-copy text-4xl text-white sm:text-5xl">
-                Share the URL and play the same game from two browsers.
-              </h1>
-              <p class="max-w-2xl text-sm leading-7 text-zinc-300 sm:text-base">
-                The server owns the game state. Your browser only keeps local selection and highlight state.
-              </p>
-              <p :if={@mode == :vs_ai} class="text-sm font-medium text-sky-100">
-                You are playing against the computer.
-              </p>
-            </div>
-          </div>
-
+        <section>
           <section
             id="board-panel"
             class="rounded-[2rem] border border-white/10 bg-black/25 p-4 shadow-[0_30px_80px_rgba(0,0,0,0.28)] backdrop-blur sm:p-6"
@@ -258,6 +241,13 @@ defmodule BreakthroughWeb.GameLive do
                   </button>
                 </div>
               </div>
+            </div>
+            <div
+              :if={@board_prompt}
+              id="board-prompt"
+              class="mt-4 rounded-2xl border border-white/8 bg-white/6 px-4 py-3 text-center text-sm font-semibold tracking-[0.08em] text-zinc-100"
+            >
+              {@board_prompt}
             </div>
           </section>
         </section>
@@ -358,7 +348,7 @@ defmodule BreakthroughWeb.GameLive do
                 Spectators: {@spectator_count}
               </div>
               <div class="rounded-2xl border border-white/8 bg-white/5 px-4 py-3">
-                Move history: {length(@game.move_history)}
+                Move no: {length(@game.move_history)}
               </div>
             </div>
           </section>
@@ -425,12 +415,13 @@ defmodule BreakthroughWeb.GameLive do
           player_side
         ),
       selected_square_id: maybe_square_id(socket.assigns[:selected_square]),
-      phase: phase_label(state.game, player_side),
+      phase: phase_label(state.game, player_side, state.players),
       turn: player_label(state.game.current_player),
       player_side_label: player_side_label(player_side),
       can_interact?:
         not socket.assigns[:game_expired] and
           can_interact?(state.game, player_side),
+      board_prompt: board_prompt(state.game, player_side),
       finish_notice: finish_notice(state.game, player_side),
       rematch_notice: rematch_notice(state, player_side),
       rematch_votes: state.rematch_votes,
@@ -549,7 +540,7 @@ defmodule BreakthroughWeb.GameLive do
   defp can_interact?(%{current_player: current_player}, player_side),
     do: player_side in [:white, :black] and player_side == current_player
 
-  defp phase_label(%{winner: winner}, player_side) when winner in [:white, :black] do
+  defp phase_label(%{winner: winner}, player_side, _players) when winner in [:white, :black] do
     cond do
       player_side == winner -> "You won"
       player_side in [:white, :black] -> "You lost"
@@ -557,9 +548,17 @@ defmodule BreakthroughWeb.GameLive do
     end
   end
 
-  defp phase_label(%{status: :finished}, _player_side), do: "Finished"
-  defp phase_label(%{status: :not_started}, _player_side), do: "Waiting"
-  defp phase_label(_game, _player_side), do: "In Progress"
+  defp phase_label(%{status: :finished}, _player_side, _players), do: "Finished"
+
+  defp phase_label(%{status: :not_started}, _player_side, players) do
+    if seats_ready?(players) do
+      "Waiting on first move"
+    else
+      "Waiting on opponent to join..."
+    end
+  end
+
+  defp phase_label(_game, _player_side, _players), do: "In Progress"
 
   defp disconnect_notice(%{players: players, player_presence: player_presence, game: game}) do
     disconnected_players =
@@ -583,6 +582,7 @@ defmodule BreakthroughWeb.GameLive do
 
   defp player_label(:white), do: "White"
   defp player_label(:black), do: "Black"
+  defp seats_ready?(players), do: not is_nil(players.white) and not is_nil(players.black)
 
   defp piece_code(nil), do: nil
   defp piece_code(:white), do: "W"
@@ -603,6 +603,21 @@ defmodule BreakthroughWeb.GameLive do
        do: MapSet.member?(rematch_votes, player_side)
 
   defp show_rematch_pending?(_game, _player_side, _rematch_votes), do: false
+
+  defp board_prompt(%{winner: winner}, player_side) when winner in [:white, :black] do
+    cond do
+      player_side == winner -> "You won"
+      player_side in [:white, :black] -> "You lost"
+      true -> nil
+    end
+  end
+
+  defp board_prompt(%{current_player: current_player}, player_side)
+       when player_side in [:white, :black] do
+    if player_side == current_player, do: "Your move", else: "Opponent's move"
+  end
+
+  defp board_prompt(_game, _player_side), do: nil
 
   defp finish_notice(%{finish_reason: {:resignation, resigning_side}}, player_side) do
     cond do
