@@ -7,8 +7,10 @@ defmodule Breakthrough.Games.GameServer do
   alias Breakthrough.Games.GameTracker
 
   @cleanup_reason :inactive
+  @ready_cleanup_reason :unstarted
   @default_pvp_cleanup_timeout_ms 10_000
   @default_ai_cleanup_timeout_ms 5_000
+  @default_pvp_ready_timeout_ms 60_000
   @ai_token :ai
   @ai_player :black
 
@@ -16,6 +18,7 @@ defmodule Breakthrough.Games.GameServer do
     id = Keyword.fetch!(opts, :id)
     mode = Keyword.get(opts, :mode, :pvp)
     cleanup_timeout_ms = Keyword.get(opts, :cleanup_timeout_ms, default_cleanup_timeout_ms(mode))
+    ready_timeout_ms = Keyword.get(opts, :ready_timeout_ms, default_ready_timeout_ms(mode))
     ai_strategy = Keyword.get(opts, :ai_strategy, ScoredStrategy)
     players = Keyword.get(opts, :players)
 
@@ -25,6 +28,7 @@ defmodule Breakthrough.Games.GameServer do
         id: id,
         mode: mode,
         cleanup_timeout_ms: cleanup_timeout_ms,
+        ready_timeout_ms: ready_timeout_ms,
         ai_strategy: ai_strategy,
         players: players
       },
@@ -65,6 +69,7 @@ defmodule Breakthrough.Games.GameServer do
         id: id,
         mode: mode,
         cleanup_timeout_ms: cleanup_timeout_ms,
+        ready_timeout_ms: ready_timeout_ms,
         ai_strategy: ai_strategy,
         players: players
       }) do
@@ -76,10 +81,14 @@ defmodule Breakthrough.Games.GameServer do
       spectators: MapSet.new(),
       cleanup_timeout_ms: cleanup_timeout_ms,
       cleanup_timer_ref: nil,
+      ready_timeout_ms: ready_timeout_ms,
+      ready_timer_ref: nil,
       connections: %{},
       ai_strategy: ai_strategy,
       rematch_votes: MapSet.new()
     }
+
+    state = maybe_schedule_ready_timeout(state)
 
     GameTracker.track_game_updated(public_state(state))
     {:ok, state}
@@ -91,7 +100,11 @@ defmodule Breakthrough.Games.GameServer do
   end
 
   def handle_call({:join_game, player_token}, _from, state) do
-    {player_side, next_state} = join_player(state, player_token)
+    {player_side, next_state} =
+      state
+      |> join_player(player_token)
+      |> then(fn {side, joined_state} -> {side, maybe_schedule_ready_timeout(joined_state)} end)
+
     broadcast_state(next_state)
     {:reply, {:ok, player_side, public_state(next_state)}, next_state}
   end
@@ -137,7 +150,11 @@ defmodule Breakthrough.Games.GameServer do
          :ok <- ensure_active_game(state.game),
          :ok <- ensure_turn(state.game, player_side),
          {:ok, next_game} <- Game.move(state.game, from, to) do
-      next_state = %{state | game: next_game, rematch_votes: MapSet.new()} |> maybe_trigger_ai()
+      next_state =
+        %{state | game: next_game, rematch_votes: MapSet.new()}
+        |> cancel_ready_timeout()
+        |> maybe_trigger_ai()
+
       broadcast_state(next_state)
       {:reply, {:ok, public_state(next_state)}, next_state}
     else
@@ -150,7 +167,10 @@ defmodule Breakthrough.Games.GameServer do
     with {:ok, player_side} <- player_side_for(state, player_token),
          :ok <- ensure_active_game(state.game),
          {:ok, next_game} <- Game.resign(state.game, player_side) do
-      next_state = %{state | game: next_game, rematch_votes: MapSet.new()}
+      next_state =
+        %{state | game: next_game, rematch_votes: MapSet.new()}
+        |> cancel_ready_timeout()
+
       broadcast_state(next_state)
       {:reply, {:ok, public_state(next_state)}, next_state}
     else
@@ -164,7 +184,9 @@ defmodule Breakthrough.Games.GameServer do
       state
       |> Map.put(:game, Game.new())
       |> Map.put(:rematch_votes, MapSet.new())
+      |> cancel_ready_timeout()
       |> maybe_trigger_ai()
+      |> maybe_schedule_ready_timeout()
       |> cancel_cleanup_if_needed()
 
     broadcast_state(next_state)
@@ -196,6 +218,23 @@ defmodule Breakthrough.Games.GameServer do
         Breakthrough.PubSub,
         topic(state.id),
         {:game_expired, @cleanup_reason}
+      )
+
+      GameTracker.track_game_stopped(state.id)
+      {:stop, :normal, state}
+    else
+      {:noreply, state}
+    end
+  end
+
+  def handle_info(:expire_if_unstarted, state) do
+    state = %{state | ready_timer_ref: nil}
+
+    if should_expire_unstarted?(state) do
+      Phoenix.PubSub.broadcast(
+        Breakthrough.PubSub,
+        topic(state.id),
+        {:game_expired, @ready_cleanup_reason}
       )
 
       GameTracker.track_game_stopped(state.id)
@@ -344,6 +383,26 @@ defmodule Breakthrough.Games.GameServer do
     end
   end
 
+  defp maybe_schedule_ready_timeout(state) do
+    cond do
+      state.ready_timeout_ms <= 0 ->
+        state
+
+      state.ready_timer_ref ->
+        state
+
+      should_expire_unstarted?(state) ->
+        %{
+          state
+          | ready_timer_ref:
+              Process.send_after(self(), :expire_if_unstarted, state.ready_timeout_ms)
+        }
+
+      true ->
+        state
+    end
+  end
+
   defp cancel_cleanup_if_needed(state) do
     if state.cleanup_timer_ref && not should_expire?(state) do
       Process.cancel_timer(state.cleanup_timer_ref)
@@ -353,6 +412,13 @@ defmodule Breakthrough.Games.GameServer do
     end
   end
 
+  defp cancel_ready_timeout(%{ready_timer_ref: nil} = state), do: state
+
+  defp cancel_ready_timeout(state) do
+    Process.cancel_timer(state.ready_timer_ref)
+    %{state | ready_timer_ref: nil}
+  end
+
   defp should_expire?(state) do
     case state.mode do
       :vs_ai -> ai_game_abandoned?(state)
@@ -360,10 +426,16 @@ defmodule Breakthrough.Games.GameServer do
     end
   end
 
+  defp should_expire_unstarted?(state) do
+    state.mode == :pvp and not started_game?(state.game) and both_human_seats_claimed?(state)
+  end
+
   defp started_game?(%{move_history: move_history}), do: move_history != []
 
   defp default_cleanup_timeout_ms(:vs_ai), do: @default_ai_cleanup_timeout_ms
   defp default_cleanup_timeout_ms(_mode), do: @default_pvp_cleanup_timeout_ms
+  defp default_ready_timeout_ms(:pvp), do: @default_pvp_ready_timeout_ms
+  defp default_ready_timeout_ms(_mode), do: 0
 
   defp player_connected?(state, side) when side in [:white, :black] do
     if state.players[side] == @ai_token do

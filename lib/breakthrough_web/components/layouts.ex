@@ -31,6 +31,10 @@ defmodule BreakthroughWeb.Layouts do
     default: nil,
     doc: "the current [scope](https://hexdocs.pm/phoenix/scopes.html)"
 
+  attr :show_flash_group, :boolean,
+    default: true,
+    doc: "whether to render the global flash group"
+
   slot :inner_block, required: true
 
   def app(assigns) do
@@ -63,7 +67,7 @@ defmodule BreakthroughWeb.Layouts do
         </div>
       </main>
 
-      <.flash_group flash={@flash} />
+      <.flash_group :if={@show_flash_group} flash={@flash} />
     </div>
     """
   end

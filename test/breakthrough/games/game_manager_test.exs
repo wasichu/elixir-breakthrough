@@ -160,6 +160,43 @@ defmodule Breakthrough.Games.GameManagerTest do
     end)
   end
 
+  test "unstarted pvp games expire a minute after the second player joins" do
+    game_id = "expire-unstarted-" <> Integer.to_string(System.unique_integer([:positive]))
+
+    {:ok, ^game_id} =
+      GameManager.create_game(id: game_id, cleanup_timeout_ms: 20, ready_timeout_ms: 20)
+
+    {:ok, :white, _state} = GameManager.join_game(game_id, "unstarted-white")
+    {:ok, :black, _state} = GameManager.join_game(game_id, "unstarted-black")
+
+    assert_eventually(fn ->
+      assert Registry.lookup(Breakthrough.Games.Registry, game_id) == []
+      snapshot = GameManager.lobby_snapshot()
+      refute Enum.any?(snapshot.recent_games, &(&1.id == game_id))
+    end)
+  end
+
+  test "the first move cancels the unstarted pvp expiry timer" do
+    game_id = "expire-unstarted-cancel-" <> Integer.to_string(System.unique_integer([:positive]))
+
+    {:ok, ^game_id} =
+      GameManager.create_game(id: game_id, cleanup_timeout_ms: 20, ready_timeout_ms: 20)
+
+    {:ok, :white, _state} = GameManager.join_game(game_id, "unstarted-cancel-white")
+    {:ok, :black, _state} = GameManager.join_game(game_id, "unstarted-cancel-black")
+
+    assert {:ok, _state} =
+             GameManager.make_move(game_id, "unstarted-cancel-white", {7, 1}, {6, 1})
+
+    Process.sleep(40)
+
+    assert {:ok, state} = GameManager.get_state(game_id)
+
+    assert state.game.move_history == [
+             %{from: {7, 1}, to: {6, 1}, player: :white, capture?: false}
+           ]
+  end
+
   test "started pvp games do not expire when only one player leaves" do
     game_id = "expire-one-left-" <> Integer.to_string(System.unique_integer([:positive]))
     {:ok, ^game_id} = GameManager.create_game(id: game_id, cleanup_timeout_ms: 20)

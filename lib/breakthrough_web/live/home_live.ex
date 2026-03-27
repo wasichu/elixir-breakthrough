@@ -43,7 +43,30 @@ defmodule BreakthroughWeb.HomeLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
+    <Layouts.app flash={@flash} current_scope={@current_scope} show_flash_group={false}>
+      <section
+        :if={Phoenix.Flash.get(@flash, :error)}
+        id="home-error-banner"
+        class="mx-auto max-w-5xl overflow-hidden rounded-[1.75rem] border border-rose-300/20 bg-[linear-gradient(135deg,rgba(120,24,24,0.92),rgba(55,18,24,0.96))] shadow-[0_24px_80px_rgba(72,12,20,0.38)]"
+      >
+        <div class="flex items-start gap-4 px-5 py-5 sm:px-6">
+          <div class="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-rose-200/20 bg-rose-200/10 text-rose-100">
+            <.icon name="hero-exclamation-triangle" class="size-5" />
+          </div>
+          <div class="min-w-0 space-y-1">
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-rose-100/80">
+              Game Unavailable
+            </p>
+            <p class="text-base font-semibold text-white sm:text-lg">
+              {Phoenix.Flash.get(@flash, :error)}
+            </p>
+            <p class="text-sm leading-6 text-rose-50/80">
+              Start a new match or join one from the lobby below.
+            </p>
+          </div>
+        </div>
+      </section>
+
       <div class="mx-auto grid max-w-5xl gap-8 lg:grid-cols-[1.4fr_0.8fr]">
         <section class="space-y-5 rounded-[2rem] border border-white/10 bg-black/25 p-8 backdrop-blur">
           <p class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-zinc-300">

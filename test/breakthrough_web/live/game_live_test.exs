@@ -30,6 +30,19 @@ defmodule BreakthroughWeb.GameLiveTest do
     refute has_element?(view, "#rules-modal")
   end
 
+  test "home page renders a styled unavailable-game banner from flash", %{conn: conn} do
+    conn =
+      conn
+      |> Plug.Test.init_test_session(%{})
+      |> Phoenix.Controller.fetch_flash([])
+      |> Phoenix.ConnTest.put_flash(:error, "That game is no longer available.")
+
+    {:ok, view, _html} = live(conn, ~p"/")
+
+    assert has_element?(view, "#home-error-banner", "That game is no longer available.")
+    refute has_element?(view, "#flash-error")
+  end
+
   test "clicking new game redirects to a unique game url", %{conn: conn} do
     {:ok, view, _html} = live(conn, ~p"/")
 
