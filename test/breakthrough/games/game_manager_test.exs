@@ -160,6 +160,45 @@ defmodule Breakthrough.Games.GameManagerTest do
     end)
   end
 
+  test "started pvp games do not expire when only one player leaves" do
+    game_id = "expire-one-left-" <> Integer.to_string(System.unique_integer([:positive]))
+    {:ok, ^game_id} = GameManager.create_game(id: game_id, cleanup_timeout_ms: 20)
+    {:ok, :white, _state} = GameManager.join_game(game_id, "one-left-white")
+    {:ok, :black, _state} = GameManager.join_game(game_id, "one-left-black")
+
+    white_pid = spawn(fn -> Process.sleep(:infinity) end)
+    black_pid = spawn(fn -> Process.sleep(:infinity) end)
+
+    assert {:ok, _state} = GameManager.track_connection(game_id, "one-left-white", white_pid)
+    assert {:ok, _state} = GameManager.track_connection(game_id, "one-left-black", black_pid)
+    assert {:ok, _state} = GameManager.make_move(game_id, "one-left-white", {7, 1}, {6, 1})
+
+    Process.exit(black_pid, :kill)
+    Process.sleep(40)
+
+    assert {:ok, state} = GameManager.get_state(game_id)
+    assert state.player_presence == %{white: true, black: false}
+  end
+
+  test "vs ai games expire after the human player disconnects" do
+    game_id = "expire-ai-" <> Integer.to_string(System.unique_integer([:positive]))
+    {:ok, ^game_id} = GameManager.create_game(id: game_id, mode: :vs_ai, cleanup_timeout_ms: 20)
+    {:ok, :white, _state} = GameManager.join_game(game_id, "ai-white")
+
+    white_pid = spawn(fn -> Process.sleep(:infinity) end)
+
+    assert {:ok, state} = GameManager.track_connection(game_id, "ai-white", white_pid)
+    assert state.player_presence == %{white: true, black: true}
+
+    Process.exit(white_pid, :kill)
+
+    assert_eventually(fn ->
+      assert Registry.lookup(Breakthrough.Games.Registry, game_id) == []
+      snapshot = GameManager.lobby_snapshot()
+      refute Enum.any?(snapshot.recent_games, &(&1.id == game_id))
+    end)
+  end
+
   defp assert_eventually(fun, attempts \\ 100)
 
   defp assert_eventually(fun, 1), do: fun.()

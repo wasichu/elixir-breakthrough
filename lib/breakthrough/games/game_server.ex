@@ -3,19 +3,20 @@ defmodule Breakthrough.Games.GameServer do
   use GenServer, restart: :transient
 
   alias Breakthrough.Game
-  alias Breakthrough.GameAI.RandomStrategy
+  alias Breakthrough.GameAI.ScoredStrategy
   alias Breakthrough.Games.GameTracker
 
   @cleanup_reason :inactive
-  @default_cleanup_timeout_ms 5_000
+  @default_pvp_cleanup_timeout_ms 10_000
+  @default_ai_cleanup_timeout_ms 5_000
   @ai_token :ai
   @ai_player :black
 
   def start_link(opts) do
     id = Keyword.fetch!(opts, :id)
     mode = Keyword.get(opts, :mode, :pvp)
-    cleanup_timeout_ms = Keyword.get(opts, :cleanup_timeout_ms, @default_cleanup_timeout_ms)
-    ai_strategy = Keyword.get(opts, :ai_strategy, RandomStrategy)
+    cleanup_timeout_ms = Keyword.get(opts, :cleanup_timeout_ms, default_cleanup_timeout_ms(mode))
+    ai_strategy = Keyword.get(opts, :ai_strategy, ScoredStrategy)
     players = Keyword.get(opts, :players)
 
     GenServer.start_link(
@@ -353,10 +354,16 @@ defmodule Breakthrough.Games.GameServer do
   end
 
   defp should_expire?(state) do
-    started_game?(state.game) and human_players_disconnected?(state)
+    case state.mode do
+      :vs_ai -> ai_game_abandoned?(state)
+      :pvp -> pvp_game_abandoned?(state)
+    end
   end
 
   defp started_game?(%{move_history: move_history}), do: move_history != []
+
+  defp default_cleanup_timeout_ms(:vs_ai), do: @default_ai_cleanup_timeout_ms
+  defp default_cleanup_timeout_ms(_mode), do: @default_pvp_cleanup_timeout_ms
 
   defp player_connected?(state, side) when side in [:white, :black] do
     if state.players[side] == @ai_token do
@@ -383,6 +390,19 @@ defmodule Breakthrough.Games.GameServer do
       white: player_connected?(state, :white),
       black: player_connected?(state, :black)
     }
+  end
+
+  defp pvp_game_abandoned?(state) do
+    started_game?(state.game) and both_human_seats_claimed?(state) and
+      human_players_disconnected?(state)
+  end
+
+  defp ai_game_abandoned?(state) do
+    is_binary(state.players.white) and not player_connected?(state, :white)
+  end
+
+  defp both_human_seats_claimed?(state) do
+    is_binary(state.players.white) and is_binary(state.players.black)
   end
 
   defp human_players_disconnected?(state) do

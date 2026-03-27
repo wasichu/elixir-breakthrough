@@ -8,6 +8,26 @@ defmodule BreakthroughWeb.GameLiveTest do
 
     assert has_element?(view, "#create-game-button")
     assert has_element?(view, "#create-ai-game-button")
+    assert has_element?(view, "#view-rules-button")
+  end
+
+  test "home page opens and closes the rules modal", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/")
+
+    refute has_element?(view, "#rules-modal")
+
+    view
+    |> element("#view-rules-button")
+    |> render_click()
+
+    assert has_element?(view, "#rules-modal")
+    assert has_element?(view, "#close-rules-button")
+
+    view
+    |> element("#close-rules-button")
+    |> render_click()
+
+    refute has_element?(view, "#rules-modal")
   end
 
   test "clicking new game redirects to a unique game url", %{conn: conn} do
@@ -260,9 +280,38 @@ defmodule BreakthroughWeb.GameLiveTest do
     |> element("#resign-game-button")
     |> render_click()
 
-    assert has_element?(white_view, "#phase-value[data-phase='Black wins']")
-    assert has_element?(black_view, "#phase-value[data-phase='Black wins']")
+    assert has_element?(white_view, "#phase-value[data-phase='You lost']")
+    assert has_element?(black_view, "#phase-value[data-phase='You won']")
     refute has_element?(white_view, "#resign-game-button")
+  end
+
+  test "spectators still see which side won after the game ends", %{conn: conn} do
+    game_id = create_game!()
+    white_conn = Plug.Test.init_test_session(conn, %{"player_token" => "white-spectator-win"})
+
+    black_conn =
+      Plug.Test.init_test_session(build_conn(), %{"player_token" => "black-spectator-win"})
+
+    spectator_conn =
+      Plug.Test.init_test_session(build_conn(), %{"player_token" => "spectator-spectator-win"})
+
+    {:ok, white_view, _html} = live(white_conn, ~p"/games/#{game_id}")
+    {:ok, _black_view, _html} = live(black_conn, ~p"/games/#{game_id}")
+    {:ok, spectator_view, _html} = live(spectator_conn, ~p"/games/#{game_id}")
+
+    white_view
+    |> element("#square-a7")
+    |> render_click()
+
+    white_view
+    |> element("#square-a6")
+    |> render_click()
+
+    white_view
+    |> element("#resign-game-button")
+    |> render_click()
+
+    assert has_element?(spectator_view, "#phase-value[data-phase='Black wins']")
   end
 
   test "rematch redirects both players and spectators to a fresh game", %{conn: conn} do

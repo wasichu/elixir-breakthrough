@@ -12,6 +12,7 @@ defmodule BreakthroughWeb.HomeLive do
     {:ok,
      socket
      |> assign(:current_scope, nil)
+     |> assign(:show_rules_modal, false)
      |> assign_lobby_snapshot(GameManager.lobby_snapshot())}
   end
 
@@ -24,6 +25,14 @@ defmodule BreakthroughWeb.HomeLive do
   def handle_event("new-ai-game", _params, socket) do
     {:ok, game_id} = GameManager.create_game(mode: :vs_ai)
     {:noreply, push_navigate(socket, to: ~p"/games/#{game_id}")}
+  end
+
+  def handle_event("open-rules", _params, socket) do
+    {:noreply, assign(socket, :show_rules_modal, true)}
+  end
+
+  def handle_event("close-rules", _params, socket) do
+    {:noreply, assign(socket, :show_rules_modal, false)}
   end
 
   @impl true
@@ -62,6 +71,14 @@ defmodule BreakthroughWeb.HomeLive do
               class="inline-flex items-center gap-2 rounded-full border border-sky-300/40 bg-sky-300/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:border-sky-200 hover:bg-sky-300/20"
             >
               <.icon name="hero-cpu-chip" class="size-4" /> Play vs AI
+            </button>
+            <button
+              id="view-rules-button"
+              type="button"
+              phx-click="open-rules"
+              class="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/6 px-5 py-3 text-sm font-semibold text-zinc-100 transition hover:border-white/25 hover:bg-white/10"
+            >
+              <.icon name="hero-book-open" class="size-4" /> View Rules
             </button>
           </div>
         </section>
@@ -117,6 +134,47 @@ defmodule BreakthroughWeb.HomeLive do
               </div>
             </div>
           </aside>
+        </div>
+      </div>
+
+      <div
+        :if={@show_rules_modal}
+        id="rules-modal"
+        class="fixed inset-0 z-50 flex items-center justify-center px-4 py-8"
+      >
+        <button
+          id="rules-modal-backdrop"
+          type="button"
+          phx-click="close-rules"
+          class="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm"
+          aria-label="Close rules dialog"
+        >
+        </button>
+        <div class="relative z-10 w-full max-w-2xl rounded-[2rem] border border-white/12 bg-zinc-950/95 p-8 shadow-[0_30px_120px_rgba(0,0,0,0.5)]">
+          <div class="flex items-start justify-between gap-6">
+            <div class="space-y-3">
+              <p class="inline-flex items-center gap-2 rounded-full border border-amber-300/25 bg-amber-300/8 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-amber-100">
+                <span class="h-2 w-2 rounded-full bg-amber-200"></span> Rules
+              </p>
+              <h2 class="display-copy text-3xl text-white sm:text-4xl">How Breakthrough Works</h2>
+              <p class="max-w-xl text-sm leading-7 text-zinc-300 sm:text-base">
+                Placeholder rules content goes here. Replace this copy with the final game rules when you are ready.
+              </p>
+            </div>
+            <button
+              id="close-rules-button"
+              type="button"
+              phx-click="close-rules"
+              class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/5 text-zinc-200 transition hover:bg-white/10"
+              aria-label="Close rules"
+            >
+              <.icon name="hero-x-mark" class="size-5" />
+            </button>
+          </div>
+
+          <div class="mt-8 rounded-[1.5rem] border border-white/8 bg-white/5 p-6 text-sm leading-7 text-zinc-300">
+            Placeholder text for the rules modal body.
+          </div>
         </div>
       </div>
     </Layouts.app>

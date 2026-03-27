@@ -407,25 +407,27 @@ defmodule BreakthroughWeb.GameLive do
   end
 
   defp assign_multiplayer_state(socket, state) do
+    player_side = socket.assigns[:player_side] || :spectator
+
     assign(socket,
       game: state.game,
       players: state.players,
       mode: state.mode,
-      files: file_labels(socket.assigns[:player_side] || :spectator),
+      files: file_labels(player_side),
       board_rows:
         board_rows(
           state.game,
           socket.assigns[:legal_targets] || MapSet.new(),
           socket.assigns[:selected_square],
-          socket.assigns[:player_side] || :spectator
+          player_side
         ),
       selected_square_id: maybe_square_id(socket.assigns[:selected_square]),
-      phase: phase_label(state.game),
+      phase: phase_label(state.game, player_side),
       turn: player_label(state.game.current_player),
-      player_side_label: player_side_label(socket.assigns[:player_side] || :spectator),
+      player_side_label: player_side_label(player_side),
       can_interact?:
         not socket.assigns[:game_expired] and
-          can_interact?(state.game, socket.assigns[:player_side] || :spectator),
+          can_interact?(state.game, player_side),
       rematch_notice: rematch_notice(state),
       rematch_votes: state.rematch_votes,
       disconnect_notice: disconnect_notice(state),
@@ -543,12 +545,17 @@ defmodule BreakthroughWeb.GameLive do
   defp can_interact?(%{current_player: current_player}, player_side),
     do: player_side in [:white, :black] and player_side == current_player
 
-  defp phase_label(%{winner: winner}) when winner in [:white, :black],
-    do: "#{player_label(winner)} wins"
+  defp phase_label(%{winner: winner}, player_side) when winner in [:white, :black] do
+    cond do
+      player_side == winner -> "You won"
+      player_side in [:white, :black] -> "You lost"
+      true -> "#{player_label(winner)} wins"
+    end
+  end
 
-  defp phase_label(%{status: :finished}), do: "Finished"
-  defp phase_label(%{status: :not_started}), do: "Waiting"
-  defp phase_label(_game), do: "In Progress"
+  defp phase_label(%{status: :finished}, _player_side), do: "Finished"
+  defp phase_label(%{status: :not_started}, _player_side), do: "Waiting"
+  defp phase_label(_game, _player_side), do: "In Progress"
 
   defp disconnect_notice(%{players: players, player_presence: player_presence, game: game}) do
     disconnected_players =
