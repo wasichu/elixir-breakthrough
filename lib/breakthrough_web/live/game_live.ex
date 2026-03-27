@@ -145,17 +145,10 @@ defmodule BreakthroughWeb.GameLive do
         <section>
           <section
             id="board-panel"
-            class="rounded-[2rem] border border-white/10 bg-black/25 p-4 shadow-[0_30px_80px_rgba(0,0,0,0.28)] backdrop-blur sm:p-6"
+            class="mx-auto w-full max-w-[48rem] rounded-[2rem] border border-white/10 bg-black/25 p-4 shadow-[0_30px_80px_rgba(0,0,0,0.28)] backdrop-blur sm:p-6"
           >
             <div class="mb-4 flex items-center justify-between gap-4">
-              <div>
-                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">
-                  Game Board
-                </p>
-                <p class="mt-1 text-sm text-zinc-300">
-                  White and Black can join by URL. Extra visitors watch as spectators.
-                </p>
-              </div>
+              <div></div>
               <button
                 :if={show_resign_button?(@game, @player_side)}
                 id="resign-game-button"
@@ -425,12 +418,12 @@ defmodule BreakthroughWeb.GameLive do
         ),
       selected_square_id: maybe_square_id(socket.assigns[:selected_square]),
       phase: phase_label(state.game, player_side, state.players),
-      turn: player_label(state.game.current_player),
+      turn: turn_label(state.game),
       player_side_label: player_side_label(player_side),
       can_interact?:
         not socket.assigns[:game_expired] and
-          can_interact?(state.game, player_side),
-      board_prompt: board_prompt(state.game, player_side),
+          can_interact?(state.game, player_side, state.players),
+      board_prompt: board_prompt(state.game, player_side, state.players),
       finish_notice: finish_notice(state.game, player_side),
       rematch_notice: rematch_notice(state, player_side),
       rematch_votes: state.rematch_votes,
@@ -544,10 +537,13 @@ defmodule BreakthroughWeb.GameLive do
   defp square_id({row, col}), do: "#{file_label(col)}#{row}"
   defp maybe_square_id(nil), do: nil
   defp maybe_square_id(coord), do: square_id(coord)
-  defp can_interact?(%{winner: winner}, _player_side) when winner in [:white, :black], do: false
 
-  defp can_interact?(%{current_player: current_player}, player_side),
-    do: player_side in [:white, :black] and player_side == current_player
+  defp can_interact?(%{winner: winner}, _player_side, _players) when winner in [:white, :black],
+    do: false
+
+  defp can_interact?(%{current_player: current_player}, player_side, players),
+    do:
+      player_side in [:white, :black] and seats_ready?(players) and player_side == current_player
 
   defp phase_label(%{winner: winner}, player_side, _players) when winner in [:white, :black] do
     cond do
@@ -592,6 +588,8 @@ defmodule BreakthroughWeb.GameLive do
   defp player_label(:white), do: "White"
   defp player_label(:black), do: "Black"
   defp seats_ready?(players), do: not is_nil(players.white) and not is_nil(players.black)
+  defp turn_label(%{status: :finished}), do: "–"
+  defp turn_label(%{current_player: current_player}), do: player_label(current_player)
 
   defp piece_code(nil), do: nil
   defp piece_code(:white), do: "W"
@@ -618,7 +616,7 @@ defmodule BreakthroughWeb.GameLive do
   defp game_expired_message(:stalled), do: "No move was made for 20 minutes. This game expired."
   defp game_expired_message(_reason), do: "This game expired."
 
-  defp board_prompt(%{winner: winner}, player_side) when winner in [:white, :black] do
+  defp board_prompt(%{winner: winner}, player_side, _players) when winner in [:white, :black] do
     cond do
       player_side == winner -> "You won"
       player_side in [:white, :black] -> "You lost"
@@ -626,12 +624,16 @@ defmodule BreakthroughWeb.GameLive do
     end
   end
 
-  defp board_prompt(%{current_player: current_player}, player_side)
+  defp board_prompt(%{status: :not_started}, _player_side, players) do
+    if seats_ready?(players), do: "Waiting on first move", else: "Waiting on opponent to join..."
+  end
+
+  defp board_prompt(%{current_player: current_player}, player_side, _players)
        when player_side in [:white, :black] do
     if player_side == current_player, do: "Your move", else: "Opponent's move"
   end
 
-  defp board_prompt(_game, _player_side), do: nil
+  defp board_prompt(_game, _player_side, _players), do: nil
 
   defp finish_notice(%{finish_reason: {:resignation, resigning_side}}, player_side) do
     cond do

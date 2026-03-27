@@ -78,10 +78,11 @@ defmodule BreakthroughWeb.GameLiveTest do
     assert has_element?(view, "#copy-link-button")
     assert has_element?(view, "#share-link-panel")
     assert has_element?(view, "#phase-value[data-phase='Waiting on opponent to join...']")
-    assert has_element?(view, "#board-prompt", "Your move")
-    assert has_element?(view, "#breakthrough-board[phx-hook='BoardDrag'][data-can-drag='true']")
+    assert has_element?(view, "#board-prompt", "Waiting on opponent to join...")
+    assert has_element?(view, "#breakthrough-board[phx-hook='BoardDrag'][data-can-drag='false']")
     assert has_element?(view, "#square-a7[data-own-piece='true'][data-row='7'][data-col='1']")
     assert has_element?(view, "#square-a2[data-own-piece='false']")
+    assert has_element?(view, "#square-a7[disabled]")
     assert has_element?(view, "#square-a2[data-piece='B']")
     assert has_element?(view, "#square-a7[data-piece='W']")
     refute has_element?(view, "#interaction-state")
@@ -104,8 +105,9 @@ defmodule BreakthroughWeb.GameLiveTest do
     assert has_element?(black_view, "#black-seat-status", "Black: You")
     assert has_element?(white_view, "#phase-value[data-phase='Waiting on first move']")
     assert has_element?(black_view, "#phase-value[data-phase='Waiting on first move']")
-    assert has_element?(white_view, "#board-prompt", "Your move")
-    assert has_element?(black_view, "#board-prompt", "Opponent's move")
+    assert has_element?(white_view, "#board-prompt", "Waiting on first move")
+    assert has_element?(black_view, "#board-prompt", "Waiting on first move")
+    assert has_element?(white_view, "#breakthrough-board[data-can-drag='true']")
     assert has_element?(white_view, "#players-panel")
     assert has_element?(black_view, "#players-panel")
     assert has_element?(black_view, "#breakthrough-board[data-can-drag='false']")
@@ -167,7 +169,11 @@ defmodule BreakthroughWeb.GameLiveTest do
 
   test "selecting another current turn piece replaces the previous selection", %{conn: conn} do
     game_id = create_game!()
-    {:ok, view, _html} = live(conn, ~p"/games/#{game_id}")
+    white_conn = Plug.Test.init_test_session(conn, %{"player_token" => "white-selecting"})
+    black_conn = Plug.Test.init_test_session(build_conn(), %{"player_token" => "black-selecting"})
+
+    {:ok, view, _html} = live(white_conn, ~p"/games/#{game_id}")
+    {:ok, _black_view, _html} = live(black_conn, ~p"/games/#{game_id}")
 
     view
     |> element("#square-a7")
@@ -190,7 +196,13 @@ defmodule BreakthroughWeb.GameLiveTest do
 
   test "clicking a dead square clears the current selection without selecting it", %{conn: conn} do
     game_id = create_game!()
-    {:ok, view, _html} = live(conn, ~p"/games/#{game_id}")
+    white_conn = Plug.Test.init_test_session(conn, %{"player_token" => "white-dead-square"})
+
+    black_conn =
+      Plug.Test.init_test_session(build_conn(), %{"player_token" => "black-dead-square"})
+
+    {:ok, view, _html} = live(white_conn, ~p"/games/#{game_id}")
+    {:ok, _black_view, _html} = live(black_conn, ~p"/games/#{game_id}")
 
     view
     |> element("#square-a7")
