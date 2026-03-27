@@ -10,6 +10,7 @@ defmodule Breakthrough.Games.GameManager do
     cleanup_timeout_ms = Keyword.get(opts, :cleanup_timeout_ms)
     ready_timeout_ms = Keyword.get(opts, :ready_timeout_ms)
     move_timeout_ms = Keyword.get(opts, :move_timeout_ms)
+    finished_timeout_ms = Keyword.get(opts, :finished_timeout_ms)
     ai_strategy = Keyword.get(opts, :ai_strategy)
     players = Keyword.get(opts, :players)
 
@@ -18,6 +19,7 @@ defmodule Breakthrough.Games.GameManager do
       |> maybe_put_cleanup_timeout(cleanup_timeout_ms)
       |> maybe_put_ready_timeout(ready_timeout_ms)
       |> maybe_put_move_timeout(move_timeout_ms)
+      |> maybe_put_finished_timeout(finished_timeout_ms)
       |> maybe_put_ai_strategy(ai_strategy)
       |> maybe_put_players(players)
 
@@ -31,6 +33,7 @@ defmodule Breakthrough.Games.GameManager do
     cleanup_timeout_ms = Keyword.get(opts, :cleanup_timeout_ms)
     ready_timeout_ms = Keyword.get(opts, :ready_timeout_ms)
     move_timeout_ms = Keyword.get(opts, :move_timeout_ms)
+    finished_timeout_ms = Keyword.get(opts, :finished_timeout_ms)
     ai_strategy = Keyword.get(opts, :ai_strategy)
     players = Keyword.get(opts, :players)
 
@@ -44,6 +47,7 @@ defmodule Breakthrough.Games.GameManager do
           |> maybe_put_cleanup_timeout(cleanup_timeout_ms)
           |> maybe_put_ready_timeout(ready_timeout_ms)
           |> maybe_put_move_timeout(move_timeout_ms)
+          |> maybe_put_finished_timeout(finished_timeout_ms)
           |> maybe_put_ai_strategy(ai_strategy)
           |> maybe_put_players(players)
           |> then(&{GameServer, &1})
@@ -136,6 +140,11 @@ defmodule Breakthrough.Games.GameManager do
 
   defp maybe_put_move_timeout(opts, move_timeout_ms),
     do: Keyword.put(opts, :move_timeout_ms, move_timeout_ms)
+
+  defp maybe_put_finished_timeout(opts, nil), do: opts
+
+  defp maybe_put_finished_timeout(opts, finished_timeout_ms),
+    do: Keyword.put(opts, :finished_timeout_ms, finished_timeout_ms)
 
   defp maybe_put_ai_strategy(opts, nil), do: opts
   defp maybe_put_ai_strategy(opts, ai_strategy), do: Keyword.put(opts, :ai_strategy, ai_strategy)

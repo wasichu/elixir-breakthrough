@@ -613,7 +613,7 @@ defmodule BreakthroughWeb.GameLive do
 
   defp game_expired_message(:inactive), do: "Both players left. This game expired."
   defp game_expired_message(:unstarted), do: "No move was made in time. This game expired."
-  defp game_expired_message(:stalled), do: "This game expired after 20 minutes of inactivity."
+  defp game_expired_message(:stalled), do: "This game expired after a period of inactivity."
   defp game_expired_message(_reason), do: "This game expired."
 
   defp board_prompt(%{winner: winner}, player_side, _players) when winner in [:white, :black] do

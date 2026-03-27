@@ -275,7 +275,7 @@ defmodule Breakthrough.Games.GameManagerTest do
     game_id = "expire-finished-" <> Integer.to_string(System.unique_integer([:positive]))
 
     {:ok, ^game_id} =
-      GameManager.create_game(id: game_id, move_timeout_ms: 20)
+      GameManager.create_game(id: game_id, move_timeout_ms: 200, finished_timeout_ms: 20)
 
     {:ok, :white, _state} = GameManager.join_game(game_id, "finished-white")
     {:ok, :black, _state} = GameManager.join_game(game_id, "finished-black")

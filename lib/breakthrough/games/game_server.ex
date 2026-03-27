@@ -13,6 +13,7 @@ defmodule Breakthrough.Games.GameServer do
   @default_ai_cleanup_timeout_ms 5_000
   @default_pvp_ready_timeout_ms 60_000
   @default_move_timeout_ms 1_200_000
+  @default_finished_timeout_ms 60_000
   @ai_token :ai
   @ai_player :black
 
@@ -22,6 +23,7 @@ defmodule Breakthrough.Games.GameServer do
     cleanup_timeout_ms = Keyword.get(opts, :cleanup_timeout_ms, default_cleanup_timeout_ms(mode))
     ready_timeout_ms = Keyword.get(opts, :ready_timeout_ms, default_ready_timeout_ms(mode))
     move_timeout_ms = Keyword.get(opts, :move_timeout_ms, @default_move_timeout_ms)
+    finished_timeout_ms = Keyword.get(opts, :finished_timeout_ms, @default_finished_timeout_ms)
     ai_strategy = Keyword.get(opts, :ai_strategy, ScoredStrategy)
     players = Keyword.get(opts, :players)
 
@@ -33,6 +35,7 @@ defmodule Breakthrough.Games.GameServer do
         cleanup_timeout_ms: cleanup_timeout_ms,
         ready_timeout_ms: ready_timeout_ms,
         move_timeout_ms: move_timeout_ms,
+        finished_timeout_ms: finished_timeout_ms,
         ai_strategy: ai_strategy,
         players: players
       },
@@ -75,6 +78,7 @@ defmodule Breakthrough.Games.GameServer do
         cleanup_timeout_ms: cleanup_timeout_ms,
         ready_timeout_ms: ready_timeout_ms,
         move_timeout_ms: move_timeout_ms,
+        finished_timeout_ms: finished_timeout_ms,
         ai_strategy: ai_strategy,
         players: players
       }) do
@@ -89,6 +93,7 @@ defmodule Breakthrough.Games.GameServer do
       ready_timeout_ms: ready_timeout_ms,
       ready_timer_ref: nil,
       move_timeout_ms: move_timeout_ms,
+      finished_timeout_ms: finished_timeout_ms,
       move_timer_ref: nil,
       connections: %{},
       ai_strategy: ai_strategy,
@@ -437,8 +442,10 @@ defmodule Breakthrough.Games.GameServer do
   end
 
   defp maybe_schedule_move_timeout(state) do
+    timeout_ms = move_timeout_ms(state)
+
     cond do
-      state.move_timeout_ms <= 0 ->
+      timeout_ms <= 0 ->
         state
 
       state.move_timer_ref ->
@@ -447,7 +454,7 @@ defmodule Breakthrough.Games.GameServer do
       should_expire_for_move_inactivity?(state) ->
         %{
           state
-          | move_timer_ref: Process.send_after(self(), :expire_if_stalled, state.move_timeout_ms)
+          | move_timer_ref: Process.send_after(self(), :expire_if_stalled, timeout_ms)
         }
 
       true ->
@@ -492,6 +499,11 @@ defmodule Breakthrough.Games.GameServer do
   defp should_expire_for_move_inactivity?(state) do
     started_game?(state.game)
   end
+
+  defp move_timeout_ms(%{game: %{status: :finished}, finished_timeout_ms: finished_timeout_ms}),
+    do: finished_timeout_ms
+
+  defp move_timeout_ms(%{move_timeout_ms: move_timeout_ms}), do: move_timeout_ms
 
   defp started_game?(%{move_history: move_history}), do: move_history != []
 
