@@ -293,6 +293,15 @@ defmodule BreakthroughWeb.GameLiveTest do
     assert {:error, {:live_redirect, %{to: "/"}}} = live(conn, ~p"/games/does-not-exist")
   end
 
+  test "live game expiry redirects viewers home with a flash", %{conn: conn} do
+    game_id = create_game!()
+    {:ok, view, _html} = live(conn, ~p"/games/#{game_id}")
+
+    send(view.pid, {:game_expired, :stalled})
+
+    assert_redirect(view, "/")
+  end
+
   test "players can resign from an active game", %{conn: conn} do
     game_id = create_game!()
     white_conn = Plug.Test.init_test_session(conn, %{"player_token" => "white-resign"})

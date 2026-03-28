@@ -124,12 +124,8 @@ defmodule BreakthroughWeb.GameLive do
     {:noreply,
      socket
      |> clear_local_selection()
-     |> assign(
-       game_expired: true,
-       phase: "Expired",
-       disconnect_notice: game_expired_message(reason),
-       can_interact?: false
-     )}
+     |> put_flash(:error, game_expired_message(reason))
+     |> push_navigate(to: ~p"/")}
   end
 
   @impl true
