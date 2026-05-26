@@ -1,0 +1,22 @@
+<svg width="64" height="64" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="white-pawn" x1="105" y1="35" x2="105" y2="214" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fffaf0" />
+      <stop offset="0.52" stop-color="#e9dcc6" />
+      <stop offset="1" stop-color="#b79d72" />
+    </linearGradient>
+    <linearGradient id="brick-face" x1="34" y1="44" x2="215" y2="211" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d97706" />
+      <stop offset="1" stop-color="#7c2d12" />
+    </linearGradient>
+  </defs>
+  <circle cx="128" cy="128" r="118" fill="#111827" />
+  <path d="M38 73H95L83 107H28L38 73Z" fill="url(#brick-face)" />
+  <path d="M169 70H218L226 106H158L169 70Z" fill="#92400e" />
+  <path d="M55 169H107L96 213H45L55 169Z" fill="#78350f" />
+  <path d="M85 101L116 68L128 109L166 78L151 124L202 116L166 145L208 178L151 169L133 217L115 171L61 187L96 147L45 125L101 124L85 101Z" fill="#f8fafc" stroke="#e2e8f0" stroke-width="7" stroke-linejoin="round" />
+  <path d="M105 79C124.33 79 140 94.67 140 114V133H151C160.389 133 168 140.611 168 150V165C168 174.389 160.389 182 151 182H59C49.611 182 42 174.389 42 165V150C42 140.611 49.611 133 59 133H70V114C70 94.67 85.67 79 105 79Z" fill="url(#white-pawn)" stroke="#7f633a" stroke-width="8" stroke-linejoin="round" />
+  <circle cx="105" cy="55" r="27" fill="url(#white-pawn)" stroke="#7f633a" stroke-width="8" />
+  <path d="M58 182H152V199C152 207.284 145.284 214 137 214H73C64.716 214 58 207.284 58 199V182Z" fill="#c9ad7a" />
+  <path d="M62 214H148" stroke="#7c5f36" stroke-width="10" stroke-linecap="round" />
+</svg>

@@ -69,14 +69,16 @@ defmodule BreakthroughWeb.HomeLive do
 
       <div class="mx-auto grid max-w-5xl gap-8 lg:grid-cols-[1.35fr_0.85fr]">
         <section class="space-y-6 rounded-lg border border-white/10 bg-zinc-950/45 p-8 shadow-[0_30px_100px_rgba(0,0,0,0.28)] backdrop-blur">
-          <p class="inline-flex items-center gap-2 rounded-full border border-teal-300/20 bg-teal-300/8 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-teal-100">
-            <span class="h-2 w-2 rounded-full bg-teal-300"></span> Browser Strategy
-          </p>
-          <h1 class="display-copy text-4xl text-white sm:text-5xl lg:text-6xl">
-            Breakthrough
-          </h1>
+          <div class="flex flex-wrap items-center gap-4">
+            <img
+              src={~p"/images/logo.svg"}
+              alt=""
+              class="h-20 w-20 rounded-lg border border-white/10 bg-white/5 p-1 shadow-[0_18px_55px_rgba(0,0,0,0.24)]"
+            />
+            <h1 class="display-copy text-4xl text-white sm:text-5xl lg:text-6xl">Breakthrough</h1>
+          </div>
           <p class="max-w-2xl text-base leading-7 text-zinc-300 sm:text-lg">
-            Race your pawns across the board, cut through enemy lines, and share a live match link with another player.
+            Race your pawns across the board and be the first to breakthrough.
           </p>
           <div class="flex flex-wrap gap-3">
             <button
@@ -181,7 +183,7 @@ defmodule BreakthroughWeb.HomeLive do
               </p>
               <h2 class="display-copy text-3xl text-white sm:text-4xl">How Breakthrough Works</h2>
               <p class="max-w-xl text-sm leading-7 text-zinc-300 sm:text-base">
-                Move one pawn each turn. The first side to reach the far edge, or capture every opposing pawn, wins.
+                White moves first. Move one pawn each turn, and win by reaching the far edge or capturing every opposing pawn.
               </p>
             </div>
             <button
@@ -198,15 +200,21 @@ defmodule BreakthroughWeb.HomeLive do
           <div class="mt-8 grid gap-3 text-sm leading-7 text-zinc-300 sm:grid-cols-3">
             <div class="rounded-2xl border border-white/8 bg-white/5 p-5">
               <p class="font-semibold text-white">Move</p>
-              <p class="mt-2">Pawns move one square straight forward into an empty square.</p>
+              <p class="mt-2">
+                Pawns move one square straight or diagonally forward into an empty square.
+              </p>
             </div>
             <div class="rounded-2xl border border-white/8 bg-white/5 p-5">
               <p class="font-semibold text-white">Capture</p>
-              <p class="mt-2">Move one square diagonally forward to take an opposing pawn.</p>
+              <p class="mt-2">
+                Capture only by moving one square diagonally forward onto an opposing pawn.
+              </p>
             </div>
             <div class="rounded-2xl border border-white/8 bg-white/5 p-5">
-              <p class="font-semibold text-white">Win</p>
-              <p class="mt-2">Reach the opposite back rank or leave the opponent with no pawns.</p>
+              <p class="font-semibold text-white">Limits</p>
+              <p class="mt-2">
+                Captures are optional, never chained, and a blocked pawn cannot move straight ahead.
+              </p>
             </div>
           </div>
         </div>

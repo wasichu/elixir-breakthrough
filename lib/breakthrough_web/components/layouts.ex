@@ -43,21 +43,23 @@ defmodule BreakthroughWeb.Layouts do
       <header class="border-b border-white/10 bg-zinc-950/55 backdrop-blur">
         <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <.link navigate={~p"/"} id="home-link" class="flex items-center gap-3 text-white">
-            <div class="flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 bg-white/8 shadow-[0_10px_30px_rgba(0,0,0,0.18)]">
-              <span class="display-copy text-xl">B</span>
+            <div class="flex h-12 w-12 items-center justify-center rounded-lg border border-white/10 bg-white/8 p-1 shadow-[0_10px_30px_rgba(0,0,0,0.18)]">
+              <img src={~p"/images/logo.svg"} alt="" class="h-full w-full" />
             </div>
             <div>
-              <p class="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">
-                Live Strategy
-              </p>
               <p class="display-copy text-xl">Breakthrough</p>
             </div>
           </.link>
 
-          <div class="flex items-center gap-3 rounded-full border border-emerald-300/20 bg-emerald-300/8 px-4 py-2 text-sm text-emerald-100">
-            <span class="h-2 w-2 rounded-full bg-emerald-300"></span>
-            <span>Live matches</span>
-          </div>
+          <.link
+            href="https://github.com/wasichu/elixir-breakthrough"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-zinc-200 transition hover:border-white/20 hover:bg-white/10"
+          >
+            <.icon name="hero-code-bracket-square" class="size-4" />
+            <span>GitHub</span>
+          </.link>
         </div>
       </header>
 
