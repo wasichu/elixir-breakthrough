@@ -4,16 +4,16 @@
 
 # Breakthrough
 
-[Play Breakthrough](https://breakthrough.slowinput.org)
-
-Breakthrough is a small real-time web implementation of the abstract strategy
-board game. Create a match, share the URL, and play in the browser. The first
+Breakthrough is a small real-time web implementation of [the abstract strategy
+board game][wp]. Create a match, share the URL, and play in the browser. The first
 visitor claims White, the second claims Black, and additional visitors can watch
 as spectators.
 
 The app is built with Phoenix LiveView and keeps the game state in supervised
 processes, so moves, lobby status, rematches, resignations, and spectator views
 update live without a separate frontend framework.
+
+[Play Breakthrough][hp]
 
 ## Features
 
@@ -121,3 +121,6 @@ or automatically span multiple nodes without additional clustering/state work.
 ## License
 
 This project is licensed under the GNU General Public License v3.0.
+
+[hp]: https://breakthrough.slowinput.org
+[wp]: https://en.wikipedia.org/wiki/Breakthrough_(board_game)
