@@ -162,73 +162,7 @@ defmodule BreakthroughWeb.HomeLive do
         </div>
       </div>
 
-      <div
-        :if={@show_rules_modal}
-        id="rules-modal"
-        class="fixed inset-0 z-50 flex items-center justify-center px-4 py-8"
-      >
-        <button
-          id="rules-modal-backdrop"
-          type="button"
-          phx-click="close-rules"
-          class="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm"
-          aria-label="Close rules dialog"
-        >
-        </button>
-        <div class="relative z-10 w-full max-w-4xl rounded-[2rem] border border-white/12 bg-zinc-950/95 p-8 shadow-[0_30px_120px_rgba(0,0,0,0.5)]">
-          <div class="flex items-start justify-between gap-6">
-            <div class="space-y-3">
-              <p class="inline-flex items-center gap-2 rounded-full border border-amber-300/25 bg-amber-300/8 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-amber-100">
-                <span class="h-2 w-2 rounded-full bg-amber-200"></span> Rules
-              </p>
-              <h2 class="display-copy text-3xl text-white sm:text-4xl">How Breakthrough Works</h2>
-              <p class="max-w-xl text-sm leading-7 text-zinc-300 sm:text-base">
-                White moves first. Move one pawn each turn, and win by reaching the far edge or capturing every opposing pawn.
-              </p>
-            </div>
-            <button
-              id="close-rules-button"
-              type="button"
-              phx-click="close-rules"
-              class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/5 text-zinc-200 transition hover:bg-white/10"
-              aria-label="Close rules"
-            >
-              <.icon name="hero-x-mark" class="size-5" />
-            </button>
-          </div>
-
-          <div class="mt-8 grid gap-3 text-sm leading-7 text-zinc-300 lg:grid-cols-4">
-            <div class="rounded-2xl border border-white/8 bg-white/5 p-5">
-              <p class="font-semibold text-white">Move</p>
-              <.rules_diagram id="rules-move-diagram" squares={move_diagram()} />
-              <p class="mt-2">
-                Pawns move one square straight or diagonally forward into an empty square.
-              </p>
-            </div>
-            <div class="rounded-2xl border border-white/8 bg-white/5 p-5">
-              <p class="font-semibold text-white">Capture</p>
-              <.rules_diagram id="rules-capture-diagram" squares={capture_diagram()} />
-              <p class="mt-2">
-                Capture only by moving one square diagonally forward onto an opposing pawn.
-              </p>
-            </div>
-            <div class="rounded-2xl border border-white/8 bg-white/5 p-5">
-              <p class="font-semibold text-white">Limits</p>
-              <.rules_diagram id="rules-limits-diagram" squares={limits_diagram()} />
-              <p class="mt-2">
-                Captures are optional, never chained, and a blocked pawn cannot move straight ahead.
-              </p>
-            </div>
-            <div class="rounded-2xl border border-white/8 bg-white/5 p-5">
-              <p class="font-semibold text-white">Win</p>
-              <.rules_diagram id="rules-win-diagram" squares={win_diagram()} />
-              <p class="mt-2">
-                Reach the opposite back rank or leave the opponent with no pawns.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
+      <.rules_modal :if={@show_rules_modal} />
     </Layouts.app>
     """
   end
@@ -238,6 +172,85 @@ defmodule BreakthroughWeb.HomeLive do
       active_games_count: snapshot.active_games_count,
       recent_games: snapshot.recent_games
     )
+  end
+
+  defp rules_modal(assigns) do
+    ~H"""
+    <div id="rules-modal" class="fixed inset-0 z-50 flex items-center justify-center px-4 py-8">
+      <button
+        id="rules-modal-backdrop"
+        type="button"
+        phx-click="close-rules"
+        class="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm"
+        aria-label="Close rules dialog"
+      >
+      </button>
+      <div class="relative z-10 w-full max-w-4xl rounded-[2rem] border border-white/12 bg-zinc-950/95 p-8 shadow-[0_30px_120px_rgba(0,0,0,0.5)]">
+        <div class="flex items-start justify-between gap-6">
+          <div class="space-y-3">
+            <p class="inline-flex items-center gap-2 rounded-full border border-amber-300/25 bg-amber-300/8 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-amber-100">
+              <span class="h-2 w-2 rounded-full bg-amber-200"></span> Rules
+            </p>
+            <h2 class="display-copy text-3xl text-white sm:text-4xl">How Breakthrough Works</h2>
+            <p class="max-w-xl text-sm leading-7 text-zinc-300 sm:text-base">
+              White moves first. Move one pawn each turn, and win by reaching the far edge or capturing every opposing pawn.
+            </p>
+          </div>
+          <button
+            id="close-rules-button"
+            type="button"
+            phx-click="close-rules"
+            class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/5 text-zinc-200 transition hover:bg-white/10"
+            aria-label="Close rules"
+          >
+            <.icon name="hero-x-mark" class="size-5" />
+          </button>
+        </div>
+
+        <div class="mt-8 grid gap-3 text-sm leading-7 text-zinc-300 lg:grid-cols-4">
+          <.rules_card
+            title="Move"
+            diagram_id="rules-move-diagram"
+            squares={move_diagram()}
+          >
+            Pawns move one square straight or diagonally forward into an empty square.
+          </.rules_card>
+          <.rules_card
+            title="Capture"
+            diagram_id="rules-capture-diagram"
+            squares={capture_diagram()}
+          >
+            Capture only by moving one square diagonally forward onto an opposing pawn.
+          </.rules_card>
+          <.rules_card
+            title="Limits"
+            diagram_id="rules-limits-diagram"
+            squares={limits_diagram()}
+          >
+            Captures are optional, never chained, and a blocked pawn cannot move straight ahead.
+          </.rules_card>
+          <.rules_card title="Win" diagram_id="rules-win-diagram" squares={win_diagram()}>
+            Reach the opposite back rank or leave the opponent with no pawns.
+          </.rules_card>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  attr :title, :string, required: true
+  attr :diagram_id, :string, required: true
+  attr :squares, :list, required: true
+  slot :inner_block, required: true
+
+  defp rules_card(assigns) do
+    ~H"""
+    <div class="rounded-2xl border border-white/8 bg-white/5 p-5">
+      <p class="font-semibold text-white">{@title}</p>
+      <.rules_diagram id={@diagram_id} squares={@squares} />
+      <p class="mt-2">{render_slot(@inner_block)}</p>
+    </div>
+    """
   end
 
   attr :id, :string, required: true
