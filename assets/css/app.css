@@ -22,9 +22,9 @@
 
 html {
   background:
-    radial-gradient(circle at top, rgba(196, 136, 56, 0.22), transparent 30%),
-    radial-gradient(circle at bottom left, rgba(115, 52, 34, 0.38), transparent 32%),
-    linear-gradient(180deg, #231a18 0%, #111215 42%, #0a0b0e 100%);
+    radial-gradient(circle at top left, rgba(45, 212, 191, 0.14), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(245, 158, 11, 0.12), transparent 30%),
+    linear-gradient(180deg, #111827 0%, #0f151f 44%, #090b10 100%);
 }
 
 body {
@@ -32,8 +32,9 @@ body {
   color: var(--page-ink);
   font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
   background:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.04), transparent 18%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055) 0 1px, transparent 1px 16px),
     linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
+  background-size: auto, 100% 100%;
 }
 
 body::selection {
@@ -42,7 +43,7 @@ body::selection {
 
 .display-copy {
   font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
 }
 
 #breakthrough-board.drag-active button[id^="square-"][data-own-piece="true"] {

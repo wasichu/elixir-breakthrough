@@ -40,23 +40,23 @@ defmodule BreakthroughWeb.Layouts do
   def app(assigns) do
     ~H"""
     <div id="app-shell" class="min-h-screen">
-      <header class="border-b border-white/10 bg-black/20 backdrop-blur">
+      <header class="border-b border-white/10 bg-zinc-950/55 backdrop-blur">
         <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <.link navigate={~p"/"} id="home-link" class="flex items-center gap-3 text-white">
-            <div class="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/8 shadow-[0_10px_30px_rgba(0,0,0,0.18)]">
+            <div class="flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 bg-white/8 shadow-[0_10px_30px_rgba(0,0,0,0.18)]">
               <span class="display-copy text-xl">B</span>
             </div>
             <div>
               <p class="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">
-                Phoenix Prototype
+                Live Strategy
               </p>
               <p class="display-copy text-xl">Breakthrough</p>
             </div>
           </.link>
 
-          <div class="flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-300">
+          <div class="flex items-center gap-3 rounded-full border border-emerald-300/20 bg-emerald-300/8 px-4 py-2 text-sm text-emerald-100">
             <span class="h-2 w-2 rounded-full bg-emerald-300"></span>
-            <span>v1 board shell</span>
+            <span>Live matches</span>
           </div>
         </div>
       </header>
@@ -111,43 +111,6 @@ defmodule BreakthroughWeb.Layouts do
         {gettext("Attempting to reconnect")}
         <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
       </.flash>
-    </div>
-    """
-  end
-
-  @doc """
-  Provides dark vs light theme toggle based on themes defined in app.css.
-
-  See <head> in root.html.heex which applies the theme before page load.
-  """
-  def theme_toggle(assigns) do
-    ~H"""
-    <div class="card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full">
-      <div class="absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 brightness-200 left-0 [[data-theme=light]_&]:left-1/3 [[data-theme=dark]_&]:left-2/3 transition-[left]" />
-
-      <button
-        class="flex p-2 cursor-pointer w-1/3"
-        phx-click={JS.dispatch("phx:set-theme")}
-        data-phx-theme="system"
-      >
-        <.icon name="hero-computer-desktop-micro" class="size-4 opacity-75 hover:opacity-100" />
-      </button>
-
-      <button
-        class="flex p-2 cursor-pointer w-1/3"
-        phx-click={JS.dispatch("phx:set-theme")}
-        data-phx-theme="light"
-      >
-        <.icon name="hero-sun-micro" class="size-4 opacity-75 hover:opacity-100" />
-      </button>
-
-      <button
-        class="flex p-2 cursor-pointer w-1/3"
-        phx-click={JS.dispatch("phx:set-theme")}
-        data-phx-theme="dark"
-      >
-        <.icon name="hero-moon-micro" class="size-4 opacity-75 hover:opacity-100" />
-      </button>
     </div>
     """
   end

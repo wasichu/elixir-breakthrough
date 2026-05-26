@@ -141,10 +141,17 @@ defmodule BreakthroughWeb.GameLive do
         <section>
           <section
             id="board-panel"
-            class="mx-auto w-full max-w-[48rem] rounded-[2rem] border border-white/10 bg-black/25 p-4 shadow-[0_30px_80px_rgba(0,0,0,0.28)] backdrop-blur sm:p-6"
+            class="mx-auto w-full max-w-[48rem] rounded-lg border border-white/10 bg-zinc-950/45 p-4 shadow-[0_30px_80px_rgba(0,0,0,0.28)] backdrop-blur sm:p-6"
           >
             <div class="mb-4 flex items-center justify-between gap-4">
-              <div></div>
+              <div class="min-w-0">
+                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">
+                  Board
+                </p>
+                <p id="turn-summary" class="mt-1 truncate text-sm font-semibold text-zinc-100">
+                  {@board_prompt || @phase}
+                </p>
+              </div>
               <button
                 :if={show_resign_button?(@game, @player_side)}
                 id="resign-game-button"
@@ -172,7 +179,7 @@ defmodule BreakthroughWeb.GameLive do
               </div>
             </div>
 
-            <div class="overflow-hidden rounded-[1.75rem] border border-white/8 bg-zinc-950/70 p-3 sm:p-4">
+            <div class="overflow-hidden rounded-lg border border-white/8 bg-zinc-950/70 p-3 sm:p-4">
               <div class="mb-3 grid grid-cols-[1.5rem_repeat(8,minmax(0,1fr))] gap-2 text-center text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-zinc-500">
                 <span></span>
                 <span :for={file <- @files}>{file}</span>
@@ -253,14 +260,14 @@ defmodule BreakthroughWeb.GameLive do
         <aside class="space-y-4">
           <section
             id="game-status-panel"
-            class="rounded-[2rem] border border-white/10 bg-white/6 p-5 backdrop-blur"
+            class="rounded-lg border border-white/10 bg-white/6 p-5 backdrop-blur"
           >
             <div class="flex items-center justify-between">
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">
                   Match Status
                 </p>
-                <p id="phase-value" data-phase={@phase} class="mt-2 text-2xl text-white">
+                <p id="phase-value" data-phase={@phase} class="mt-2 text-2xl font-semibold text-white">
                   {@phase}
                 </p>
                 <p :if={@finish_notice} id="finish-note" class="mt-2 text-sm text-amber-100">
@@ -278,8 +285,8 @@ defmodule BreakthroughWeb.GameLive do
               </span>
             </div>
 
-            <dl class="mt-5 space-y-4 text-sm text-zinc-300">
-              <div class="rounded-2xl border border-white/8 bg-black/20 p-4">
+            <dl class="mt-5 grid gap-3 text-sm text-zinc-300">
+              <div class="rounded-lg border border-white/8 bg-black/20 p-4">
                 <dt class="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">
                   You Are
                 </dt>
@@ -287,11 +294,11 @@ defmodule BreakthroughWeb.GameLive do
                   {@player_side_label}
                 </dd>
               </div>
-              <div class="rounded-2xl border border-white/8 bg-black/20 p-4">
+              <div class="rounded-lg border border-white/8 bg-black/20 p-4">
                 <dt class="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">Turn</dt>
                 <dd id="turn-value" data-turn={@turn} class="mt-1 text-lg text-white">{@turn}</dd>
               </div>
-              <div class="rounded-2xl border border-white/8 bg-black/20 p-4">
+              <div class="rounded-lg border border-white/8 bg-black/20 p-4">
                 <dt class="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">
                   Share Link
                 </dt>
@@ -326,26 +333,34 @@ defmodule BreakthroughWeb.GameLive do
 
           <section
             id="players-panel"
-            class="rounded-[2rem] border border-white/10 bg-black/25 p-5 backdrop-blur"
+            class="rounded-lg border border-white/10 bg-zinc-950/45 p-5 backdrop-blur"
           >
             <p class="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">Seats</p>
             <div class="mt-4 space-y-3 text-sm text-zinc-300">
               <div
                 id="white-seat-status"
-                class="rounded-2xl border border-white/8 bg-white/5 px-4 py-3"
+                class="flex items-center justify-between gap-3 rounded-lg border border-white/8 bg-white/5 px-4 py-3"
               >
-                White: {seat_status(@players.white, @player_token, @player_presence.white)}
+                <span>
+                  White: {seat_status(@players.white, @player_token, @player_presence.white)}
+                </span>
+                <span class="h-3 w-3 rounded-full bg-stone-100 shadow-[0_0_0_1px_rgba(0,0,0,0.65)]">
+                </span>
               </div>
               <div
                 id="black-seat-status"
-                class="rounded-2xl border border-white/8 bg-white/5 px-4 py-3"
+                class="flex items-center justify-between gap-3 rounded-lg border border-white/8 bg-white/5 px-4 py-3"
               >
-                Black: {seat_status(@players.black, @player_token, @player_presence.black)}
+                <span>
+                  Black: {seat_status(@players.black, @player_token, @player_presence.black)}
+                </span>
+                <span class="h-3 w-3 rounded-full bg-zinc-950 shadow-[0_0_0_1px_rgba(255,255,255,0.35)]">
+                </span>
               </div>
-              <div id="spectator-count" class="rounded-2xl border border-white/8 bg-white/5 px-4 py-3">
+              <div id="spectator-count" class="rounded-lg border border-white/8 bg-white/5 px-4 py-3">
                 Spectators: {@spectator_count}
               </div>
-              <div class="rounded-2xl border border-white/8 bg-white/5 px-4 py-3">
+              <div class="rounded-lg border border-white/8 bg-white/5 px-4 py-3">
                 Move no: {length(@game.move_history)}
               </div>
             </div>

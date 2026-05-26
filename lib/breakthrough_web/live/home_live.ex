@@ -67,16 +67,16 @@ defmodule BreakthroughWeb.HomeLive do
         </div>
       </section>
 
-      <div class="mx-auto grid max-w-5xl gap-8 lg:grid-cols-[1.4fr_0.8fr]">
-        <section class="space-y-5 rounded-[2rem] border border-white/10 bg-black/25 p-8 backdrop-blur">
-          <p class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-zinc-300">
-            <span class="h-2 w-2 rounded-full bg-emerald-300"></span> Multiplayer v1
+      <div class="mx-auto grid max-w-5xl gap-8 lg:grid-cols-[1.35fr_0.85fr]">
+        <section class="space-y-6 rounded-lg border border-white/10 bg-zinc-950/45 p-8 shadow-[0_30px_100px_rgba(0,0,0,0.28)] backdrop-blur">
+          <p class="inline-flex items-center gap-2 rounded-full border border-teal-300/20 bg-teal-300/8 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-teal-100">
+            <span class="h-2 w-2 rounded-full bg-teal-300"></span> Browser Strategy
           </p>
-          <h1 class="display-copy text-4xl text-white sm:text-5xl">
-            Start a game and share the URL.
+          <h1 class="display-copy text-4xl text-white sm:text-5xl lg:text-6xl">
+            Breakthrough
           </h1>
-          <p class="max-w-2xl text-sm leading-7 text-zinc-300 sm:text-base">
-            The first visitor joins as White, the second joins as Black, and everyone after that watches as a spectator.
+          <p class="max-w-2xl text-base leading-7 text-zinc-300 sm:text-lg">
+            Race your pawns across the board, cut through enemy lines, and share a live match link with another player.
           </p>
           <div class="flex flex-wrap gap-3">
             <button
@@ -107,24 +107,24 @@ defmodule BreakthroughWeb.HomeLive do
         </section>
 
         <div class="space-y-4">
-          <aside class="rounded-[2rem] border border-white/10 bg-white/6 p-6 backdrop-blur">
+          <aside class="rounded-lg border border-white/10 bg-white/6 p-6 backdrop-blur">
             <p class="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">
               How It Works
             </p>
             <ul class="mt-4 space-y-3 text-sm leading-6 text-zinc-300">
               <li class="rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
-                Open the new game in your browser to claim White.
+                Create a match to claim White.
               </li>
               <li class="rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
-                Open the same URL in another browser or private window to claim Black.
+                Send the game URL to another player so they can claim Black.
               </li>
               <li class="rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
-                Anyone else visiting the same link becomes a spectator and sees live updates.
+                Extra visitors become spectators and see every move live.
               </li>
             </ul>
           </aside>
 
-          <aside class="rounded-[2rem] border border-white/10 bg-black/25 p-6 backdrop-blur">
+          <aside class="rounded-lg border border-white/10 bg-zinc-950/45 p-6 backdrop-blur">
             <p class="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">Lobby</p>
             <div class="mt-4 rounded-2xl border border-white/8 bg-white/5 px-4 py-3 text-sm text-zinc-300">
               Active games:
@@ -181,7 +181,7 @@ defmodule BreakthroughWeb.HomeLive do
               </p>
               <h2 class="display-copy text-3xl text-white sm:text-4xl">How Breakthrough Works</h2>
               <p class="max-w-xl text-sm leading-7 text-zinc-300 sm:text-base">
-                Placeholder rules content goes here. Replace this copy with the final game rules when you are ready.
+                Move one pawn each turn. The first side to reach the far edge, or capture every opposing pawn, wins.
               </p>
             </div>
             <button
@@ -195,8 +195,19 @@ defmodule BreakthroughWeb.HomeLive do
             </button>
           </div>
 
-          <div class="mt-8 rounded-[1.5rem] border border-white/8 bg-white/5 p-6 text-sm leading-7 text-zinc-300">
-            Placeholder text for the rules modal body.
+          <div class="mt-8 grid gap-3 text-sm leading-7 text-zinc-300 sm:grid-cols-3">
+            <div class="rounded-2xl border border-white/8 bg-white/5 p-5">
+              <p class="font-semibold text-white">Move</p>
+              <p class="mt-2">Pawns move one square straight forward into an empty square.</p>
+            </div>
+            <div class="rounded-2xl border border-white/8 bg-white/5 p-5">
+              <p class="font-semibold text-white">Capture</p>
+              <p class="mt-2">Move one square diagonally forward to take an opposing pawn.</p>
+            </div>
+            <div class="rounded-2xl border border-white/8 bg-white/5 p-5">
+              <p class="font-semibold text-white">Win</p>
+              <p class="mt-2">Reach the opposite back rank or leave the opponent with no pawns.</p>
+            </div>
           </div>
         </div>
       </div>
