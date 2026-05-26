@@ -175,7 +175,7 @@ defmodule BreakthroughWeb.HomeLive do
           aria-label="Close rules dialog"
         >
         </button>
-        <div class="relative z-10 w-full max-w-2xl rounded-[2rem] border border-white/12 bg-zinc-950/95 p-8 shadow-[0_30px_120px_rgba(0,0,0,0.5)]">
+        <div class="relative z-10 w-full max-w-4xl rounded-[2rem] border border-white/12 bg-zinc-950/95 p-8 shadow-[0_30px_120px_rgba(0,0,0,0.5)]">
           <div class="flex items-start justify-between gap-6">
             <div class="space-y-3">
               <p class="inline-flex items-center gap-2 rounded-full border border-amber-300/25 bg-amber-300/8 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-amber-100">
@@ -197,23 +197,33 @@ defmodule BreakthroughWeb.HomeLive do
             </button>
           </div>
 
-          <div class="mt-8 grid gap-3 text-sm leading-7 text-zinc-300 sm:grid-cols-3">
+          <div class="mt-8 grid gap-3 text-sm leading-7 text-zinc-300 lg:grid-cols-4">
             <div class="rounded-2xl border border-white/8 bg-white/5 p-5">
               <p class="font-semibold text-white">Move</p>
+              <.rules_diagram id="rules-move-diagram" squares={move_diagram()} />
               <p class="mt-2">
                 Pawns move one square straight or diagonally forward into an empty square.
               </p>
             </div>
             <div class="rounded-2xl border border-white/8 bg-white/5 p-5">
               <p class="font-semibold text-white">Capture</p>
+              <.rules_diagram id="rules-capture-diagram" squares={capture_diagram()} />
               <p class="mt-2">
                 Capture only by moving one square diagonally forward onto an opposing pawn.
               </p>
             </div>
             <div class="rounded-2xl border border-white/8 bg-white/5 p-5">
               <p class="font-semibold text-white">Limits</p>
+              <.rules_diagram id="rules-limits-diagram" squares={limits_diagram()} />
               <p class="mt-2">
                 Captures are optional, never chained, and a blocked pawn cannot move straight ahead.
+              </p>
+            </div>
+            <div class="rounded-2xl border border-white/8 bg-white/5 p-5">
+              <p class="font-semibold text-white">Win</p>
+              <.rules_diagram id="rules-win-diagram" squares={win_diagram()} />
+              <p class="mt-2">
+                Reach the opposite back rank or leave the opponent with no pawns.
               </p>
             </div>
           </div>
@@ -228,5 +238,101 @@ defmodule BreakthroughWeb.HomeLive do
       active_games_count: snapshot.active_games_count,
       recent_games: snapshot.recent_games
     )
+  end
+
+  attr :id, :string, required: true
+  attr :squares, :list, required: true
+
+  defp rules_diagram(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      class="mt-4 grid aspect-square w-full grid-cols-4 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900"
+      aria-hidden="true"
+    >
+      <div
+        :for={square <- @squares}
+        class={[
+          "relative flex items-center justify-center border border-zinc-900/55",
+          if(square.tone == :light, do: "bg-[#b99568]", else: "bg-[#5e4436]"),
+          square.marker in [:finish, :white_finish] && "bg-emerald-300/35"
+        ]}
+      >
+        <span
+          :if={square.marker == :target}
+          class="h-6 w-6 rounded-full border border-emerald-100/70 bg-emerald-300/45 shadow-[0_0_18px_rgba(110,231,183,0.35)]"
+        >
+        </span>
+        <span
+          :if={square.marker in [:blocked, :blocked_black]}
+          class="absolute inset-2 rounded-md border border-rose-100/50 bg-rose-500/25"
+        >
+        </span>
+        <span
+          :if={square.marker == :chain}
+          class="absolute inset-3 rounded-full border-2 border-rose-100/80"
+        >
+          <span class="absolute left-1/2 top-0 h-full w-0.5 -translate-x-1/2 rotate-45 bg-rose-100/80">
+          </span>
+        </span>
+        <img
+          :if={square.marker in [:white, :white_finish]}
+          src={~p"/images/pawn.svg"}
+          alt=""
+          class="relative h-10 w-10 drop-shadow-[0_2px_2px_rgba(0,0,0,0.75)]"
+        />
+        <img
+          :if={square.marker in [:black, :blocked_black]}
+          src={~p"/images/pawn.svg"}
+          alt=""
+          class="relative h-10 w-10 brightness-[0.28] contrast-[1.25] saturate-0 drop-shadow-[0_2px_1px_rgba(255,244,220,0.22)]"
+        />
+      </div>
+    </div>
+    """
+  end
+
+  defp move_diagram do
+    diagram_squares(fn
+      {3, 2} -> :white
+      {2, col} when col in [1, 2, 3] -> :target
+      _coord -> nil
+    end)
+  end
+
+  defp capture_diagram do
+    diagram_squares(fn
+      {3, 2} -> :white
+      {2, col} when col in [1, 3] -> :black
+      _coord -> nil
+    end)
+  end
+
+  defp limits_diagram do
+    diagram_squares(fn
+      {4, 2} -> :white
+      {3, 2} -> :blocked_black
+      {3, 3} -> :black
+      {2, 4} -> :chain
+      _coord -> nil
+    end)
+  end
+
+  defp win_diagram do
+    diagram_squares(fn
+      {1, 3} -> :white_finish
+      {1, _col} -> :finish
+      {3, 1} -> :black
+      _coord -> nil
+    end)
+  end
+
+  defp diagram_squares(marker_fun) do
+    for row <- 1..4, col <- 1..4 do
+      %{
+        tone: if(rem(row + col, 2) == 0, do: :light, else: :dark),
+        marker: marker_fun.({row, col})
+      }
+    end
   end
 end
