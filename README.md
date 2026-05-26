@@ -4,6 +4,8 @@
 
 # Breakthrough
 
+[Play Breakthrough](https://breakthrough.slowinput.org)
+
 Breakthrough is a small real-time web implementation of the abstract strategy
 board game. Create a match, share the URL, and play in the browser. The first
 visitor claims White, the second claims Black, and additional visitors can watch
