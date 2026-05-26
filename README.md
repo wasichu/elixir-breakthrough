@@ -1,8 +1,8 @@
-# Breakthrough
-
 <p align="center">
   <img src="priv/static/images/logo.svg" alt="Breakthrough logo" width="180" />
 </p>
+
+# Breakthrough
 
 Breakthrough is a small real-time web implementation of the abstract strategy
 board game. Create a match, share the URL, and play in the browser. The first
