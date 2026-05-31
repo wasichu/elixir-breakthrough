@@ -176,7 +176,10 @@ defmodule BreakthroughWeb.HomeLive do
 
   defp rules_modal(assigns) do
     ~H"""
-    <div id="rules-modal" class="fixed inset-0 z-50 flex items-center justify-center px-4 py-8">
+    <div
+      id="rules-modal"
+      class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-3 py-3 sm:items-center sm:px-6 sm:py-6"
+    >
       <button
         id="rules-modal-backdrop"
         type="button"
@@ -185,13 +188,13 @@ defmodule BreakthroughWeb.HomeLive do
         aria-label="Close rules dialog"
       >
       </button>
-      <div class="relative z-10 w-full max-w-4xl rounded-[2rem] border border-white/12 bg-zinc-950/95 p-8 shadow-[0_30px_120px_rgba(0,0,0,0.5)]">
-        <div class="flex items-start justify-between gap-6">
+      <div class="relative z-10 max-h-[calc(100dvh-1.5rem)] w-full max-w-4xl overflow-y-auto rounded-lg border border-white/12 bg-zinc-950/95 p-4 shadow-[0_30px_120px_rgba(0,0,0,0.5)] sm:max-h-[calc(100dvh-3rem)] sm:p-6 lg:p-8">
+        <div class="flex items-start justify-between gap-4 sm:gap-6">
           <div class="space-y-3">
             <p class="inline-flex items-center gap-2 rounded-full border border-amber-300/25 bg-amber-300/8 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-amber-100">
               <span class="h-2 w-2 rounded-full bg-amber-200"></span> Rules
             </p>
-            <h2 class="display-copy text-3xl text-white sm:text-4xl">How Breakthrough Works</h2>
+            <h2 class="display-copy text-2xl text-white sm:text-4xl">How Breakthrough Works</h2>
             <p class="max-w-xl text-sm leading-7 text-zinc-300 sm:text-base">
               White moves first. Move one pawn each turn, and win by reaching the far edge or capturing every opposing pawn.
             </p>
@@ -200,14 +203,14 @@ defmodule BreakthroughWeb.HomeLive do
             id="close-rules-button"
             type="button"
             phx-click="close-rules"
-            class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/5 text-zinc-200 transition hover:bg-white/10"
+            class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-zinc-200 transition hover:bg-white/10 sm:h-11 sm:w-11"
             aria-label="Close rules"
           >
             <.icon name="hero-x-mark" class="size-5" />
           </button>
         </div>
 
-        <div class="mt-8 grid gap-3 text-sm leading-7 text-zinc-300 lg:grid-cols-4">
+        <div class="mt-5 grid gap-3 text-sm leading-6 text-zinc-300 sm:mt-8 sm:grid-cols-2 sm:leading-7 lg:grid-cols-4">
           <.rules_card
             title="Move"
             diagram_id="rules-move-diagram"
@@ -245,7 +248,7 @@ defmodule BreakthroughWeb.HomeLive do
 
   defp rules_card(assigns) do
     ~H"""
-    <div class="rounded-2xl border border-white/8 bg-white/5 p-5">
+    <div class="rounded-lg border border-white/8 bg-white/5 p-4 sm:p-5">
       <p class="font-semibold text-white">{@title}</p>
       <.rules_diagram id={@diagram_id} squares={@squares} />
       <p class="mt-2">{render_slot(@inner_block)}</p>
@@ -260,7 +263,7 @@ defmodule BreakthroughWeb.HomeLive do
     ~H"""
     <div
       id={@id}
-      class="mt-4 grid aspect-square w-full grid-cols-4 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900"
+      class="mx-auto mt-3 grid aspect-square w-24 grid-cols-4 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 sm:mt-4 sm:w-full"
       aria-hidden="true"
     >
       <div
@@ -292,13 +295,13 @@ defmodule BreakthroughWeb.HomeLive do
           :if={square.marker in [:white, :white_finish]}
           src={~p"/images/pawn.svg"}
           alt=""
-          class="relative h-10 w-10 drop-shadow-[0_2px_2px_rgba(0,0,0,0.75)]"
+          class="relative h-6 w-6 drop-shadow-[0_2px_2px_rgba(0,0,0,0.75)] sm:h-10 sm:w-10"
         />
         <img
           :if={square.marker in [:black, :blocked_black]}
           src={~p"/images/pawn.svg"}
           alt=""
-          class="relative h-10 w-10 brightness-[0.28] contrast-[1.25] saturate-0 drop-shadow-[0_2px_1px_rgba(255,244,220,0.22)]"
+          class="relative h-6 w-6 brightness-[0.28] contrast-[1.25] saturate-0 drop-shadow-[0_2px_1px_rgba(255,244,220,0.22)] sm:h-10 sm:w-10"
         />
       </div>
     </div>
