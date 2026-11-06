@@ -70,5 +70,5 @@ jobs:
             --env FLY_PRIVATE_IP=::1 \
             --env FLY_IMAGE_REF=registry.fly.io/breakthrough@sha256:example \
             breakthrough:ci
-          curl --fail --silent --show-error --retry 10 --retry-connrefused \
+          curl --fail --silent --show-error --retry 30 --retry-all-errors \
             --retry-delay 1 --retry-max-time 45 --max-time 5 http://127.0.0.1:4801/ > /dev/null
