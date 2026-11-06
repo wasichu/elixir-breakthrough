@@ -35,3 +35,12 @@ breakthrough-*.tar
 npm-debug.log
 /assets/node_modules/
 
+# Machine-local design consent and runtime artifacts.
+/.impeccable/config.local.json
+/.impeccable/hook.cache.json
+/.impeccable/live/sessions/
+
+# Browser-test dependencies and reports.
+/node_modules/
+/test-results/
+/playwright-report/

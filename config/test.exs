@@ -1,7 +1,8 @@
 import Config
 
 config :breakthrough, BreakthroughWeb.Endpoint,
-  http: [ip: {127, 0, 0, 1}, port: 4002],
+  url: [host: "127.0.0.1", port: String.to_integer(System.get_env("PORT") || "4002")],
+  http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("PORT") || "4002")],
   secret_key_base: "mLVpqafE2cFmMkqvfYDnxDapJPNNR1BU+kxrC4dV9VIIOthqGrbZZeDADcfwF51k",
   server: false
 

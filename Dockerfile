@@ -1,24 +1,6 @@
-# Find eligible builder and runner images on Docker Hub. We use Ubuntu/Debian
-# instead of Alpine to avoid DNS resolution issues in production.
-#
-# https://hub.docker.com/r/hexpm/elixir/tags?name=ubuntu
-# https://hub.docker.com/_/ubuntu/tags
-#
-# This file is based on these images:
-#
-#   - https://hub.docker.com/r/hexpm/elixir/tags - for the build image
-#   - https://hub.docker.com/_/debian/tags?name=trixie-20260518-slim - for the release image
-#   - https://pkgs.org/ - resource for finding needed packages
-#   - Ex: docker.io/hexpm/elixir:1.16.3-erlang-26.2.5.2-debian-trixie-20260518-slim
-#
-ARG ELIXIR_VERSION=1.16.3
-ARG OTP_VERSION=26.2.5.2
-ARG DEBIAN_VERSION=trixie-20260518-slim
-
-ARG BUILDER_IMAGE="docker.io/hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
-ARG RUNNER_IMAGE="docker.io/debian:${DEBIAN_VERSION}"
-
-FROM ${BUILDER_IMAGE} AS builder
+# Keep the builder's Elixir/OTP versions aligned with mise.toml.
+# Literal image references let Dependabot discover and update the base images.
+FROM docker.io/hexpm/elixir:1.20.4-erlang-29.1.1-debian-trixie-20261005-slim AS builder
 
 # install build dependencies
 RUN apt-get update \
@@ -68,7 +50,7 @@ RUN mix release
 
 # start a new build stage so that the final image will only contain
 # the compiled release and other runtime necessities
-FROM ${RUNNER_IMAGE} AS final
+FROM docker.io/debian:trixie-20261005-slim AS final
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends libstdc++6 openssl libncurses6 locales ca-certificates \
