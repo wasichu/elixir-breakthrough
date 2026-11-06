@@ -16,6 +16,8 @@
   development toolchain with mise and expose routine commands through Just.
 - Add GitHub Actions, weekly Dependabot updates, and isolated desktop/mobile
   Playwright coverage with accessibility scans and failure artifacts.
+- Use the Fly machine ID for release node names, independent of image tags or
+  digests, and require a passing HTTP health check during deployment.
 - Update repository and coding-agent guidance. Correct production origins for
   the custom domain and keep the in-memory deployment on one application machine.
 
