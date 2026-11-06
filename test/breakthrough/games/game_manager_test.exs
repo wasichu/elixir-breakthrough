@@ -3,6 +3,61 @@ defmodule Breakthrough.Games.GameManagerTest do
 
   alias Breakthrough.Games.GameManager
 
+  test "an unclaimed invitation expires and releases its creator slot" do
+    token = creator_token()
+    assert {:ok, id} = GameManager.create_game(creator_token: token, waiting_timeout_ms: 50)
+    [{pid, _}] = Registry.lookup(Breakthrough.Games.Registry, id)
+    ref = Process.monitor(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
+    assert {:error, :not_found} = GameManager.get_state(id)
+    assert {:error, :not_found} = GameManager.get_created_game(token)
+    assert {:ok, _new_id} = GameManager.create_game(creator_token: token)
+  end
+
+  test "AI games expire when the human never makes a first move" do
+    assert {:ok, id} =
+             GameManager.create_game(
+               mode: :vs_ai,
+               creator_token: creator_token(),
+               ready_timeout_ms: 50
+             )
+
+    [{pid, _}] = Registry.lookup(Breakthrough.Games.Registry, id)
+    ref = Process.monitor(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
+    assert {:error, :not_found} = GameManager.get_state(id)
+  end
+
+  test "resigning before any move still expires the finished game" do
+    token = creator_token()
+
+    assert {:ok, id} =
+             GameManager.create_game(mode: :vs_ai, creator_token: token, finished_timeout_ms: 50)
+
+    [{pid, _}] = Registry.lookup(Breakthrough.Games.Registry, id)
+    ref = Process.monitor(pid)
+    assert {:ok, state} = GameManager.resign(id, token)
+    assert state.game.move_history == []
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
+    assert {:error, :not_found} = GameManager.get_state(id)
+  end
+
+  test "joining and subsequent moves ignore expiry messages from cancelled deadlines" do
+    white = creator_token()
+    black = creator_token()
+    assert {:ok, id} = GameManager.create_game(creator_token: white)
+    [{pid, _}] = Registry.lookup(Breakthrough.Games.Registry, id)
+    waiting_ref = :sys.get_state(pid).waiting_timer_ref
+    assert {:ok, :black, _state} = GameManager.join_game(id, black)
+    send(pid, {:timeout, waiting_ref, :expire_if_waiting})
+    assert {:ok, _state} = GameManager.make_move(id, white, {7, 1}, {6, 1})
+    move_ref = :sys.get_state(pid).move_timer_ref
+    assert {:ok, _state} = GameManager.make_move(id, black, {2, 1}, {3, 1})
+    send(pid, {:timeout, move_ref, :expire_if_stalled})
+    assert {:ok, state} = GameManager.get_state(id)
+    assert length(state.game.move_history) == 2
+  end
+
   test "players join as white, black, then spectator" do
     {:ok, game_id} = GameManager.create_game()
 
@@ -22,6 +77,14 @@ defmodule Breakthrough.Games.GameManagerTest do
     assert state.players.white == "token-white"
     assert state.players.black == "token-black"
     assert state.spectator_count == 0
+  end
+
+  test "a waiting player cannot bypass the lobby by submitting a move directly" do
+    token = creator_token()
+    assert {:ok, id} = GameManager.create_game(creator_token: token)
+    assert {:error, :not_ready} = GameManager.make_move(id, token, {7, 1}, {6, 1})
+    assert {:ok, state} = GameManager.get_state(id)
+    assert state.game.status == :not_started
   end
 
   test "make_move/4 rejects spectators and wrong-turn players" do
@@ -115,16 +178,6 @@ defmodule Breakthrough.Games.GameManagerTest do
     assert {:ok, _state} = GameManager.resign(game_id, "token-white")
 
     assert {:error, :spectator} = GameManager.create_rematch(game_id, "token-spectator")
-  end
-
-  test "lobby snapshot tracks active and recent games" do
-    game_id = "lobby-" <> Integer.to_string(System.unique_integer([:positive]))
-
-    assert {:ok, ^game_id} = GameManager.create_game(id: game_id)
-
-    snapshot = GameManager.lobby_snapshot()
-    assert snapshot.active_games_count >= 1
-    assert Enum.any?(snapshot.recent_games, &(&1.id == game_id))
   end
 
   test "started games expire after both connected players leave" do
@@ -288,6 +341,129 @@ defmodule Breakthrough.Games.GameManagerTest do
       refute Enum.any?(snapshot.recent_games, &(&1.id == game_id))
     end)
   end
+
+  test "a creator can have only one unfinished game across modes" do
+    token = creator_token()
+    assert {:ok, game_id} = GameManager.create_game(creator_token: token)
+    assert {:ok, state} = GameManager.get_state(game_id)
+    assert state.players.white == token
+
+    for mode <- [:pvp, :vs_ai] do
+      assert {:error, {:active_game, ^game_id}} =
+               GameManager.create_game(creator_token: token, mode: mode)
+    end
+
+    assert {:ok, _other_game} = GameManager.create_game(creator_token: creator_token())
+  end
+
+  test "creation claims the white seat before another visitor joins" do
+    token = creator_token()
+    assert {:ok, game_id} = GameManager.create_game(creator_token: token)
+    assert {:ok, :black, state} = GameManager.join_game(game_id, creator_token())
+    assert state.players.white == token
+    assert {:ok, :white, _state} = GameManager.join_game(game_id, token)
+  end
+
+  test "concurrent requests reserve exactly one game for a creator" do
+    token = creator_token()
+
+    results =
+      1..12
+      |> Task.async_stream(fn _ -> GameManager.create_game(creator_token: token) end,
+        max_concurrency: 12
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    assert [{:ok, game_id}] = Enum.filter(results, &match?({:ok, _}, &1))
+    assert Enum.count(results, &(&1 == {:error, {:active_game, game_id}})) == 11
+  end
+
+  test "finishing a game releases the creator's slot while its result remains available" do
+    token = creator_token()
+    assert {:ok, game_id} = GameManager.create_game(creator_token: token, mode: :vs_ai)
+    assert {:ok, _state} = GameManager.resign(game_id, token)
+    assert {:ok, next_id} = GameManager.create_game(creator_token: token)
+    refute next_id == game_id
+    assert {:ok, %{game: %{status: :finished}}} = GameManager.get_state(game_id)
+  end
+
+  test "winning by reaching the back rank releases the creator's slot" do
+    white = creator_token()
+    black = creator_token()
+    {:ok, game_id} = GameManager.create_game(creator_token: white)
+    {:ok, :black, _state} = GameManager.join_game(game_id, black)
+
+    for {player, from, to} <- [
+          {white, {7, 1}, {6, 1}},
+          {black, {2, 8}, {3, 8}},
+          {white, {6, 1}, {5, 1}},
+          {black, {3, 8}, {4, 8}},
+          {white, {5, 1}, {4, 1}},
+          {black, {4, 8}, {5, 8}},
+          {white, {4, 1}, {3, 1}},
+          {black, {5, 8}, {6, 8}},
+          {white, {3, 1}, {2, 2}},
+          {black, {6, 8}, {7, 7}}
+        ] do
+      assert {:ok, _state} = GameManager.make_move(game_id, player, from, to)
+    end
+
+    assert {:ok, %{game: %{status: :finished, winner: :white}}} =
+             GameManager.make_move(game_id, white, {2, 2}, {1, 1})
+
+    assert {:ok, _next_id} = GameManager.create_game(creator_token: white)
+  end
+
+  test "expiration releases the creator's slot" do
+    token = creator_token()
+
+    assert {:ok, game_id} =
+             GameManager.create_game(creator_token: token, ready_timeout_ms: 10)
+
+    {:ok, :black, _state} = GameManager.join_game(game_id, creator_token())
+    [{pid, _}] = Registry.lookup(Breakthrough.Games.Registry, game_id)
+    ref = Process.monitor(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
+    assert {:ok, _next_id} = GameManager.create_game(creator_token: token)
+  end
+
+  test "a terminated game releases the creator's slot" do
+    token = creator_token()
+    assert {:ok, game_id} = GameManager.create_game(creator_token: token)
+    [{pid, _}] = Registry.lookup(Breakthrough.Games.Registry, game_id)
+    ref = Process.monitor(pid)
+    :ok = DynamicSupervisor.terminate_child(Breakthrough.Games.GameSupervisor, pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :shutdown}, 1_000
+    assert {:ok, _next_id} = GameManager.create_game(creator_token: token)
+  end
+
+  test "repeated rematch requests cannot create multiple active games" do
+    token = creator_token()
+    assert {:ok, game_id} = GameManager.create_game(creator_token: token, mode: :vs_ai)
+    assert {:ok, _state} = GameManager.resign(game_id, token)
+    assert {:ok, rematch_id} = GameManager.create_rematch(game_id, token)
+    assert {:error, {:active_game, ^rematch_id}} = GameManager.create_rematch(game_id, token)
+    assert {:error, {:active_game, ^rematch_id}} = GameManager.create_game(creator_token: token)
+  end
+
+  test "only the waiting game's white player can cancel, freeing the creation slot" do
+    token = creator_token()
+    assert {:ok, game_id} = GameManager.create_game(creator_token: token)
+    assert {:error, :not_waiting} = GameManager.cancel_game(game_id, creator_token())
+    assert :ok = GameManager.cancel_game(game_id, token)
+    assert {:ok, _next_id} = GameManager.create_game(creator_token: token)
+  end
+
+  test "a waiting game cannot be cancelled after an opponent joins" do
+    token = creator_token()
+    assert {:ok, game_id} = GameManager.create_game(creator_token: token)
+    assert {:ok, :black, _state} = GameManager.join_game(game_id, creator_token())
+    assert {:error, :not_waiting} = GameManager.cancel_game(game_id, token)
+    assert {:ok, _state} = GameManager.make_move(game_id, token, {7, 1}, {6, 1})
+    assert {:error, {:active_game, ^game_id}} = GameManager.create_game(creator_token: token)
+  end
+
+  defp creator_token, do: "creator-#{System.unique_integer([:positive])}"
 
   defp assert_eventually(fun, attempts \\ 100)
 

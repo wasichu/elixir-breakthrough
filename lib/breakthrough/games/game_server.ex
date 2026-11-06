@@ -11,7 +11,8 @@ defmodule Breakthrough.Games.GameServer do
   @move_cleanup_reason :stalled
   @default_pvp_cleanup_timeout_ms 10_000
   @default_ai_cleanup_timeout_ms 5_000
-  @default_pvp_ready_timeout_ms 60_000
+  @default_waiting_timeout_ms 900_000
+  @default_ready_timeout_ms 60_000
   @default_move_timeout_ms 1_200_000
   @default_finished_timeout_ms 60_000
   @ai_token :ai
@@ -21,11 +22,13 @@ defmodule Breakthrough.Games.GameServer do
     id = Keyword.fetch!(opts, :id)
     mode = Keyword.get(opts, :mode, :pvp)
     cleanup_timeout_ms = Keyword.get(opts, :cleanup_timeout_ms, default_cleanup_timeout_ms(mode))
-    ready_timeout_ms = Keyword.get(opts, :ready_timeout_ms, default_ready_timeout_ms(mode))
+    waiting_timeout_ms = Keyword.get(opts, :waiting_timeout_ms, @default_waiting_timeout_ms)
+    ready_timeout_ms = Keyword.get(opts, :ready_timeout_ms, @default_ready_timeout_ms)
     move_timeout_ms = Keyword.get(opts, :move_timeout_ms, @default_move_timeout_ms)
     finished_timeout_ms = Keyword.get(opts, :finished_timeout_ms, @default_finished_timeout_ms)
     ai_strategy = Keyword.get(opts, :ai_strategy, ScoredStrategy)
     players = Keyword.get(opts, :players)
+    creator_token = Keyword.get(opts, :creator_token)
 
     GenServer.start_link(
       __MODULE__,
@@ -33,11 +36,13 @@ defmodule Breakthrough.Games.GameServer do
         id: id,
         mode: mode,
         cleanup_timeout_ms: cleanup_timeout_ms,
+        waiting_timeout_ms: waiting_timeout_ms,
         ready_timeout_ms: ready_timeout_ms,
         move_timeout_ms: move_timeout_ms,
         finished_timeout_ms: finished_timeout_ms,
         ai_strategy: ai_strategy,
-        players: players
+        players: players,
+        creator_token: creator_token
       },
       name: via_tuple(id)
     )
@@ -60,6 +65,9 @@ defmodule Breakthrough.Games.GameServer do
     GenServer.call(via_tuple(game_id), {:create_rematch, player_token})
   end
 
+  def cancel_game(game_id, player_token),
+    do: GenServer.call(via_tuple(game_id), {:cancel_game, player_token})
+
   def resign(game_id, player_token) do
     GenServer.call(via_tuple(game_id), {:resign, player_token})
   end
@@ -72,24 +80,36 @@ defmodule Breakthrough.Games.GameServer do
   def set_mode(game_id, mode), do: GenServer.call(via_tuple(game_id), {:set_mode, mode})
 
   @impl true
-  def init(%{
-        id: id,
-        mode: mode,
-        cleanup_timeout_ms: cleanup_timeout_ms,
-        ready_timeout_ms: ready_timeout_ms,
-        move_timeout_ms: move_timeout_ms,
-        finished_timeout_ms: finished_timeout_ms,
-        ai_strategy: ai_strategy,
-        players: players
-      }) do
+  def init(opts) do
+    with :ok <- claim_creation_slot(opts.creator_token, opts.id) do
+      init_game(opts)
+    else
+      {:error, reason} -> {:stop, reason}
+    end
+  end
+
+  defp init_game(%{
+         id: id,
+         mode: mode,
+         cleanup_timeout_ms: cleanup_timeout_ms,
+         waiting_timeout_ms: waiting_timeout_ms,
+         ready_timeout_ms: ready_timeout_ms,
+         move_timeout_ms: move_timeout_ms,
+         finished_timeout_ms: finished_timeout_ms,
+         ai_strategy: ai_strategy,
+         players: players,
+         creator_token: creator_token
+       }) do
     state = %{
       id: id,
       game: Game.new(),
       mode: mode,
-      players: players || initial_players(mode),
-      spectators: MapSet.new(),
+      players: players || Map.put(initial_players(mode), :white, creator_token),
+      creator_token: creator_token,
       cleanup_timeout_ms: cleanup_timeout_ms,
       cleanup_timer_ref: nil,
+      waiting_timeout_ms: waiting_timeout_ms,
+      waiting_timer_ref: nil,
       ready_timeout_ms: ready_timeout_ms,
       ready_timer_ref: nil,
       move_timeout_ms: move_timeout_ms,
@@ -100,7 +120,7 @@ defmodule Breakthrough.Games.GameServer do
       rematch_votes: MapSet.new()
     }
 
-    state = maybe_schedule_ready_timeout(state)
+    state = state |> maybe_schedule_waiting_timeout() |> maybe_schedule_ready_timeout()
 
     GameTracker.track_game_updated(public_state(state))
     {:ok, state}
@@ -115,7 +135,9 @@ defmodule Breakthrough.Games.GameServer do
     {player_side, next_state} =
       state
       |> join_player(player_token)
-      |> then(fn {side, joined_state} -> {side, maybe_schedule_ready_timeout(joined_state)} end)
+      |> then(fn {side, joined_state} ->
+        {side, joined_state |> sync_waiting_timeout() |> maybe_schedule_ready_timeout()}
+      end)
 
     broadcast_state(next_state)
     {:reply, {:ok, player_side, public_state(next_state)}, next_state}
@@ -160,10 +182,12 @@ defmodule Breakthrough.Games.GameServer do
   def handle_call({:make_move, player_token, from, to}, _from, state) do
     with {:ok, player_side} <- player_side_for(state, player_token),
          :ok <- ensure_active_game(state.game),
+         :ok <- ensure_players_ready(state.players),
          :ok <- ensure_turn(state.game, player_side),
          {:ok, next_game} <- Game.move(state.game, from, to) do
       next_state =
         %{state | game: next_game, rematch_votes: MapSet.new()}
+        |> cancel_waiting_timeout()
         |> cancel_ready_timeout()
         |> maybe_trigger_ai()
         |> restart_move_timeout()
@@ -176,12 +200,24 @@ defmodule Breakthrough.Games.GameServer do
     end
   end
 
+  def handle_call({:cancel_game, player_token}, _from, state) do
+    with {:ok, :white} <- player_side_for(state, player_token),
+         true <- state.game.status == :not_started and is_nil(state.players.black) do
+      Phoenix.PubSub.broadcast(Breakthrough.PubSub, topic(state.id), {:game_expired, :cancelled})
+      GameTracker.track_game_stopped(state.id)
+      {:stop, :normal, :ok, state}
+    else
+      _ -> {:reply, {:error, :not_waiting}, state}
+    end
+  end
+
   def handle_call({:resign, player_token}, _from, state) do
     with {:ok, player_side} <- player_side_for(state, player_token),
          :ok <- ensure_active_game(state.game),
          {:ok, next_game} <- Game.resign(state.game, player_side) do
       next_state =
         %{state | game: next_game, rematch_votes: MapSet.new()}
+        |> cancel_waiting_timeout()
         |> cancel_ready_timeout()
         |> restart_move_timeout()
 
@@ -198,9 +234,11 @@ defmodule Breakthrough.Games.GameServer do
       state
       |> Map.put(:game, Game.new())
       |> Map.put(:rematch_votes, MapSet.new())
+      |> cancel_waiting_timeout()
       |> cancel_ready_timeout()
       |> cancel_move_timeout()
       |> maybe_trigger_ai()
+      |> maybe_schedule_waiting_timeout()
       |> maybe_schedule_ready_timeout()
       |> cancel_cleanup_if_needed()
 
@@ -223,6 +261,41 @@ defmodule Breakthrough.Games.GameServer do
 
     broadcast_state(next_state)
     {:noreply, next_state}
+  end
+
+  def handle_info({:timeout, ref, :expire_if_inactive}, %{cleanup_timer_ref: ref} = state),
+    do: handle_info(:expire_if_inactive, state)
+
+  def handle_info({:timeout, ref, :expire_if_waiting}, %{waiting_timer_ref: ref} = state),
+    do: handle_info(:expire_if_waiting, state)
+
+  def handle_info({:timeout, ref, :expire_if_unstarted}, %{ready_timer_ref: ref} = state),
+    do: handle_info(:expire_if_unstarted, state)
+
+  def handle_info({:timeout, ref, :expire_if_stalled}, %{move_timer_ref: ref} = state),
+    do: handle_info(:expire_if_stalled, state)
+
+  # A cancelled timer may already have delivered its message. Never let that old
+  # deadline expire a game after a move, reconnect, or change in waiting state.
+  def handle_info({:timeout, _ref, event}, state)
+      when event in [
+             :expire_if_inactive,
+             :expire_if_waiting,
+             :expire_if_unstarted,
+             :expire_if_stalled
+           ],
+      do: {:noreply, state}
+
+  def handle_info(:expire_if_waiting, state) do
+    state = Map.put(state, :waiting_timer_ref, nil)
+
+    if waiting_for_player?(state) do
+      Phoenix.PubSub.broadcast(Breakthrough.PubSub, topic(state.id), {:game_expired, :waiting})
+      GameTracker.track_game_stopped(state.id)
+      {:stop, :normal, state}
+    else
+      {:noreply, state}
+    end
   end
 
   def handle_info(:expire_if_inactive, state) do
@@ -291,7 +364,7 @@ defmodule Breakthrough.Games.GameServer do
         {:black, put_in(state.players.black, player_token)}
 
       true ->
-        {:spectator, update_in(state.spectators, &MapSet.put(&1, player_token))}
+        {:spectator, state}
     end
   end
 
@@ -338,6 +411,11 @@ defmodule Breakthrough.Games.GameServer do
   defp ensure_finished_game(%{winner: winner}) when winner in [:white, :black], do: :ok
   defp ensure_finished_game(_game), do: {:error, :not_finished}
 
+  defp ensure_players_ready(%{white: white, black: black})
+       when not is_nil(white) and not is_nil(black), do: :ok
+
+  defp ensure_players_ready(_players), do: {:error, :not_ready}
+
   defp ensure_turn(%{current_player: current_player}, current_player), do: :ok
   defp ensure_turn(_game, _side), do: {:error, :not_your_turn}
 
@@ -365,7 +443,8 @@ defmodule Breakthrough.Games.GameServer do
   defp maybe_trigger_ai(state), do: state
 
   defp maybe_create_rematch(%{mode: :vs_ai} = state, :white) do
-    with {:ok, game_id} <- Breakthrough.Games.GameManager.create_game(rematch_game_opts(state)) do
+    with {:ok, game_id} <-
+           Breakthrough.Games.GameManager.create_game(rematch_game_opts(state, :white)) do
       {:ok, game_id, %{state | rematch_votes: MapSet.new()}}
     end
   end
@@ -374,7 +453,8 @@ defmodule Breakthrough.Games.GameServer do
     next_state = %{state | rematch_votes: MapSet.put(state.rematch_votes, player_side)}
 
     if MapSet.size(next_state.rematch_votes) == 2 do
-      with {:ok, game_id} <- Breakthrough.Games.GameManager.create_game(rematch_game_opts(state)) do
+      with {:ok, game_id} <-
+             Breakthrough.Games.GameManager.create_game(rematch_game_opts(state, player_side)) do
         {:ok, game_id, %{next_state | rematch_votes: MapSet.new()}}
       end
     else
@@ -382,17 +462,22 @@ defmodule Breakthrough.Games.GameServer do
     end
   end
 
-  defp rematch_game_opts(%{mode: :vs_ai, ai_strategy: ai_strategy, players: players}) do
+  defp rematch_game_opts(
+         %{mode: :vs_ai, ai_strategy: ai_strategy, players: players},
+         _player_side
+       ) do
     [
       mode: :vs_ai,
+      creator_token: players.white,
       ai_strategy: ai_strategy,
       players: %{white: players.white, black: @ai_token}
     ]
   end
 
-  defp rematch_game_opts(%{mode: :pvp, ai_strategy: ai_strategy, players: players}) do
+  defp rematch_game_opts(%{mode: :pvp, ai_strategy: ai_strategy, players: players}, player_side) do
     [
       mode: :pvp,
+      creator_token: Map.fetch!(players, player_side),
       ai_strategy: ai_strategy,
       players: %{white: players.black, black: players.white}
     ]
@@ -407,12 +492,46 @@ defmodule Breakthrough.Games.GameServer do
         %{
           state
           | cleanup_timer_ref:
-              Process.send_after(self(), :expire_if_inactive, state.cleanup_timeout_ms)
+              :erlang.start_timer(state.cleanup_timeout_ms, self(), :expire_if_inactive)
         }
 
       true ->
         state
     end
+  end
+
+  defp maybe_schedule_waiting_timeout(state) do
+    timeout_ms = Map.get(state, :waiting_timeout_ms, @default_waiting_timeout_ms)
+
+    if timeout_ms > 0 && is_nil(Map.get(state, :waiting_timer_ref)) && waiting_for_player?(state) do
+      Map.put(
+        state,
+        :waiting_timer_ref,
+        :erlang.start_timer(timeout_ms, self(), :expire_if_waiting)
+      )
+    else
+      state
+    end
+  end
+
+  defp sync_waiting_timeout(state) do
+    if waiting_for_player?(state),
+      do: maybe_schedule_waiting_timeout(state),
+      else: cancel_waiting_timeout(state)
+  end
+
+  defp cancel_waiting_timeout(state) do
+    if ref = Map.get(state, :waiting_timer_ref) do
+      Process.cancel_timer(ref)
+      Map.put(state, :waiting_timer_ref, nil)
+    else
+      state
+    end
+  end
+
+  defp waiting_for_player?(state) do
+    state.game.status == :not_started &&
+      (is_nil(state.players.white) || is_nil(state.players.black))
   end
 
   defp maybe_schedule_ready_timeout(state) do
@@ -427,7 +546,7 @@ defmodule Breakthrough.Games.GameServer do
         %{
           state
           | ready_timer_ref:
-              Process.send_after(self(), :expire_if_unstarted, state.ready_timeout_ms)
+              :erlang.start_timer(state.ready_timeout_ms, self(), :expire_if_unstarted)
         }
 
       true ->
@@ -454,7 +573,7 @@ defmodule Breakthrough.Games.GameServer do
       should_expire_for_move_inactivity?(state) ->
         %{
           state
-          | move_timer_ref: Process.send_after(self(), :expire_if_stalled, timeout_ms)
+          | move_timer_ref: :erlang.start_timer(timeout_ms, self(), :expire_if_stalled)
         }
 
       true ->
@@ -493,11 +612,12 @@ defmodule Breakthrough.Games.GameServer do
   end
 
   defp should_expire_unstarted?(state) do
-    state.mode == :pvp and not started_game?(state.game) and both_human_seats_claimed?(state)
+    state.game.status == :not_started and not is_nil(state.players.white) and
+      not is_nil(state.players.black)
   end
 
   defp should_expire_for_move_inactivity?(state) do
-    started_game?(state.game)
+    state.game.status in [:in_progress, :finished]
   end
 
   defp move_timeout_ms(%{game: %{status: :finished}, finished_timeout_ms: finished_timeout_ms}),
@@ -509,8 +629,6 @@ defmodule Breakthrough.Games.GameServer do
 
   defp default_cleanup_timeout_ms(:vs_ai), do: @default_ai_cleanup_timeout_ms
   defp default_cleanup_timeout_ms(_mode), do: @default_pvp_cleanup_timeout_ms
-  defp default_ready_timeout_ms(:pvp), do: @default_pvp_ready_timeout_ms
-  defp default_ready_timeout_ms(_mode), do: 0
 
   defp player_connected?(state, side) when side in [:white, :black] do
     if state.players[side] == @ai_token do
@@ -573,7 +691,32 @@ defmodule Breakthrough.Games.GameServer do
     }
   end
 
+  defp claim_creation_slot(nil, _game_id), do: :ok
+
+  defp claim_creation_slot(token, game_id) when is_binary(token) do
+    key = {:game_creator, token}
+
+    case Registry.register(Breakthrough.Games.Registry, key, game_id) do
+      {:ok, _owner} ->
+        :ok
+
+      {:error, {:already_registered, _pid}} ->
+        case Registry.lookup(Breakthrough.Games.Registry, key) do
+          [{_pid, active_game_id}] -> {:error, {:active_game, active_game_id}}
+          [] -> claim_creation_slot(token, game_id)
+        end
+    end
+  end
+
+  defp release_creation_slot(%{game: %{status: :finished}, creator_token: token})
+       when is_binary(token) do
+    Registry.unregister(Breakthrough.Games.Registry, {:game_creator, token})
+  end
+
+  defp release_creation_slot(_state), do: :ok
+
   defp broadcast_state(state) do
+    release_creation_slot(state)
     GameTracker.track_game_updated(public_state(state))
 
     Phoenix.PubSub.broadcast(

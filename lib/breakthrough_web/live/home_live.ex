@@ -2,29 +2,57 @@ defmodule BreakthroughWeb.HomeLive do
   use BreakthroughWeb, :live_view
 
   alias Breakthrough.Games.GameManager
+  import BreakthroughWeb.RulesComponents, only: [rules_modal: 1]
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, %{"player_token" => player_token}, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Breakthrough.PubSub, Breakthrough.Games.GameTracker.topic())
     end
 
     {:ok,
      socket
+     |> assign(:player_token, player_token)
      |> assign(:current_scope, nil)
      |> assign(:show_rules_modal, false)
+     |> assign(:creation_notice, nil)
      |> assign_lobby_snapshot(GameManager.lobby_snapshot())}
   end
 
   @impl true
   def handle_event("new-game", _params, socket) do
-    {:ok, game_id} = GameManager.create_game()
-    {:noreply, push_navigate(socket, to: ~p"/games/#{game_id}")}
+    create_game(socket, :pvp)
   end
 
   def handle_event("new-ai-game", _params, socket) do
-    {:ok, game_id} = GameManager.create_game(mode: :vs_ai)
-    {:noreply, push_navigate(socket, to: ~p"/games/#{game_id}")}
+    create_game(socket, :vs_ai)
+  end
+
+  def handle_event("cancel-current-game", %{"id" => game_id}, socket) do
+    result =
+      with {:ok, %{id: ^game_id}} <- GameManager.get_created_game(socket.assigns.player_token) do
+        GameManager.cancel_game(game_id, socket.assigns.player_token)
+      end
+
+    socket = socket |> assign(:creation_notice, nil) |> assign_created_game()
+
+    message =
+      case result do
+        :ok ->
+          "Waiting game cancelled. You can start a new match."
+
+        {:error, :not_waiting} ->
+          "Your opponent has joined. Return to the game to play or resign."
+
+        _ ->
+          if socket.assigns.created_game do
+            "That waiting game is no longer available to cancel. Your current game is shown below."
+          else
+            "That waiting game has already ended. You can start a new match."
+          end
+      end
+
+    {:noreply, put_flash(socket, :info, message)}
   end
 
   def handle_event("open-rules", _params, socket) do
@@ -44,6 +72,14 @@ defmodule BreakthroughWeb.HomeLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} show_flash_group={false}>
+      <p
+        :if={Phoenix.Flash.get(@flash, :info)}
+        id="home-info-banner"
+        role="status"
+        class="mx-auto max-w-5xl rounded-xl border border-amber-200/20 bg-amber-200/5 px-5 py-4 text-sm leading-6 text-amber-100"
+      >
+        {Phoenix.Flash.get(@flash, :info)}
+      </p>
       <section
         :if={Phoenix.Flash.get(@flash, :error)}
         id="home-error-banner"
@@ -67,99 +103,145 @@ defmodule BreakthroughWeb.HomeLive do
         </div>
       </section>
 
-      <div class="mx-auto grid max-w-5xl gap-8 lg:grid-cols-[1.35fr_0.85fr]">
-        <section class="space-y-6 rounded-lg border border-white/10 bg-zinc-950/45 p-8 shadow-[0_30px_100px_rgba(0,0,0,0.28)] backdrop-blur">
-          <div class="flex flex-wrap items-center gap-4">
-            <img
-              src={~p"/images/logo.svg"}
-              alt=""
-              class="h-20 w-20 rounded-lg border border-white/10 bg-white/5 p-1 shadow-[0_18px_55px_rgba(0,0,0,0.24)]"
-            />
-            <h1 class="display-copy text-4xl text-white sm:text-5xl lg:text-6xl">Breakthrough</h1>
-          </div>
-          <p class="max-w-2xl text-base leading-7 text-zinc-300 sm:text-lg">
-            Race your pawns across the board and be the first to breakthrough.
-          </p>
-          <div class="flex flex-wrap gap-3">
-            <button
-              id="create-game-button"
-              type="button"
-              phx-click="new-game"
-              class="inline-flex items-center gap-2 rounded-full border border-amber-300/40 bg-amber-300/10 px-5 py-3 text-sm font-semibold text-amber-100 transition hover:border-amber-200 hover:bg-amber-300/20"
-            >
-              <.icon name="hero-user-group" class="size-4" /> New Multiplayer Game
-            </button>
-            <button
-              id="create-ai-game-button"
-              type="button"
-              phx-click="new-ai-game"
-              class="inline-flex items-center gap-2 rounded-full border border-sky-300/40 bg-sky-300/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:border-sky-200 hover:bg-sky-300/20"
-            >
-              <.icon name="hero-cpu-chip" class="size-4" /> Play vs AI
-            </button>
-            <button
-              id="view-rules-button"
-              type="button"
-              phx-click="open-rules"
-              class="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/6 px-5 py-3 text-sm font-semibold text-zinc-100 transition hover:border-white/25 hover:bg-white/10"
-            >
-              <.icon name="hero-book-open" class="size-4" /> View Rules
-            </button>
-          </div>
-        </section>
-
-        <div class="space-y-4">
-          <aside class="rounded-lg border border-white/10 bg-white/6 p-6 backdrop-blur">
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">
-              How It Works
+      <div id="home-lobby" class="mx-auto max-w-5xl space-y-12 sm:space-y-16">
+        <div class="grid items-start gap-10 lg:grid-cols-[1.5fr_1fr] lg:gap-16">
+          <section id="start-playing" class="space-y-6 py-2 sm:py-6" aria-labelledby="home-title">
+            <h1 id="home-title" class="display-copy text-5xl text-white sm:text-6xl">Breakthrough</h1>
+            <p class="max-w-lg text-lg leading-8 text-zinc-300">
+              Race your pawns across the board and be the first to breakthrough.
             </p>
-            <ul class="mt-4 space-y-3 text-sm leading-6 text-zinc-300">
-              <li class="rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
-                Create a match to claim White.
-              </li>
-              <li class="rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
-                Send the game URL to another player so they can claim Black.
-              </li>
-              <li class="rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
-                Extra visitors become spectators and see every move live.
-              </li>
-            </ul>
-          </aside>
-
-          <aside class="rounded-lg border border-white/10 bg-zinc-950/45 p-6 backdrop-blur">
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">Lobby</p>
-            <div class="mt-4 rounded-2xl border border-white/8 bg-white/5 px-4 py-3 text-sm text-zinc-300">
-              Active games:
-              <span id="active-games-count" class="font-semibold text-white">
-                {@active_games_count}
-              </span>
-            </div>
-            <div class="mt-4 space-y-3">
-              <.link
-                :for={game <- @recent_games}
-                navigate={~p"/games/#{game.id}"}
-                class="flex items-center justify-between rounded-2xl border border-white/8 bg-white/5 px-4 py-3 text-sm text-zinc-300 transition hover:bg-white/10"
-              >
-                <span class="flex items-center gap-2 font-medium text-white">
-                  <span>{game.id}</span>
-                  <span
-                    :if={game.mode == :vs_ai}
-                    class="rounded-full border border-sky-300/30 bg-sky-300/10 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-sky-100"
-                  >
-                    AI
-                  </span>
-                </span>
-                <span class="text-zinc-400">{if game.full?, do: "View game", else: "Join game"}</span>
-              </.link>
-              <div
-                :if={@recent_games == []}
-                class="rounded-2xl border border-white/8 bg-white/5 px-4 py-3 text-sm text-zinc-400"
-              >
-                No active games yet.
+            <section
+              :if={@created_game}
+              id="current-created-game"
+              data-game-id={@created_game.id}
+              aria-labelledby="current-game-title"
+              class="rounded-xl border border-white/15 bg-white/3 p-5"
+            >
+              <h2 id="current-game-title" class="display-copy text-2xl text-white">
+                {created_game_title(@created_game)}
+              </h2>
+              <p class="mt-2 text-sm leading-6 text-zinc-300">
+                <%= if @created_game.waiting? do %>
+                  You can have one active game at a time. Return to invite a friend, or cancel this waiting game before starting another.
+                <% else %>
+                  Finish or resign from this game before creating another. You can return to it below.
+                <% end %>
+              </p>
+              <div class="mt-4 flex flex-wrap gap-2">
+                <.link
+                  id="return-to-current-game"
+                  navigate={~p"/games/#{@created_game.id}"}
+                  class="play-button play-button-secondary"
+                >Return to game</.link>
+                <button
+                  :if={@created_game.waiting?}
+                  id="cancel-current-game-button"
+                  type="button"
+                  phx-click="cancel-current-game"
+                  phx-value-id={@created_game.id}
+                  phx-disable-with="Cancelling…"
+                  class="play-button play-button-quiet"
+                >Cancel waiting game</button>
               </div>
+            </section>
+            <div class="flex flex-col items-start gap-3 pt-2">
+              <button
+                id="create-game-button"
+                type="button"
+                phx-click="new-game"
+                phx-disable-with={
+                  if @created_game, do: "Checking current game…", else: "Creating match…"
+                }
+                class="play-button play-button-primary"
+              >
+                <.icon name="hero-user-group" class="size-5" /> New Multiplayer Game
+                <.icon name="hero-arrow-right" class="ml-2 size-4" />
+              </button>
+              <div class="flex flex-wrap gap-2">
+                <button
+                  id="create-ai-game-button"
+                  type="button"
+                  phx-click="new-ai-game"
+                  phx-disable-with={
+                    if @created_game, do: "Checking current game…", else: "Creating match…"
+                  }
+                  class="play-button play-button-secondary"
+                >
+                  <.icon name="hero-cpu-chip" class="size-4" /> Play vs AI
+                </button>
+                <button
+                  id="view-rules-button"
+                  type="button"
+                  phx-click={JS.push_focus() |> JS.push("open-rules")}
+                  aria-haspopup="dialog"
+                  aria-expanded={to_string(@show_rules_modal)}
+                  class="play-button play-button-quiet"
+                >
+                  <.icon name="hero-book-open" class="size-4" /> View Rules
+                </button>
+              </div>
+              <p
+                :if={@creation_notice}
+                id="new-game-notice"
+                role="status"
+                class="max-w-prose text-sm leading-6 text-amber-100"
+              >
+                {@creation_notice}
+              </p>
             </div>
+          </section>
+
+          <aside class="border-t border-white/12 pt-6 lg:mt-8" aria-labelledby="how-it-works-title">
+            <h2 id="how-it-works-title" class="display-copy text-2xl text-white">How It Works</h2>
+            <ol class="mt-5 list-decimal space-y-4 pl-5 text-sm leading-7 text-zinc-300 marker:text-amber-200">
+              <li class="pl-2">Create a match to claim White.</li>
+              <li class="pl-2">Send the game URL to another player so they can claim Black.</li>
+              <li class="pl-2">Extra visitors become spectators and see every move live.</li>
+            </ol>
           </aside>
         </div>
+
+        <section id="lobby-panel" class="border-t border-white/12 pt-7" aria-labelledby="lobby-title">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h2 id="lobby-title" class="display-copy text-3xl text-white">Lobby</h2>
+            <p class="flex items-center gap-2 text-sm text-zinc-400">
+              <span class="size-1.5 rounded-full bg-emerald-300" aria-hidden="true"></span>
+              Active games:
+              <span id="active-games-count" class="tabular-nums text-zinc-100">{@active_games_count}</span>
+            </p>
+          </div>
+          <div id="recent-games" class="mt-5 divide-y divide-white/10">
+            <.link
+              :for={game <- @recent_games}
+              id={"lobby-game-#{game.id}"}
+              navigate={~p"/games/#{game.id}"}
+              class="lobby-game flex min-h-16 items-center justify-between gap-4 py-4 text-sm"
+            >
+              <span class="flex min-w-0 items-center gap-3 font-medium text-white">
+                <.icon name="hero-squares-2x2" class="size-5 shrink-0 text-amber-200/80" />
+                <span class="truncate">{game.id}</span>
+                <span
+                  :if={game.mode == :vs_ai}
+                  id={"lobby-ai-#{game.id}"}
+                  class="rounded border border-sky-300/25 px-2 py-0.5 text-xs text-sky-100"
+                >AI</span>
+              </span>
+              <span class="flex shrink-0 items-center gap-2 text-zinc-300">
+                {if game.full? || Map.get(game, :status) == :finished,
+                  do: "View game",
+                  else: "Join game"}
+                <.icon name="hero-arrow-up-right" class="size-4" />
+              </span>
+            </.link>
+            <p
+              :if={@recent_games == []}
+              id="lobby-empty-state"
+              class="py-8 text-sm leading-7 text-zinc-400"
+            >
+              No active games yet.
+            </p>
+          </div>
+        </section>
       </div>
 
       <.rules_modal :if={@show_rules_modal} />
@@ -167,188 +249,54 @@ defmodule BreakthroughWeb.HomeLive do
     """
   end
 
+  defp create_game(socket, mode) do
+    case GameManager.create_game(mode: mode, creator_token: socket.assigns.player_token) do
+      {:ok, game_id} ->
+        {:noreply, push_navigate(socket, to: ~p"/games/#{game_id}")}
+
+      {:error, {:active_game, _game_id}} ->
+        socket = assign_created_game(socket)
+
+        message =
+          if socket.assigns.created_game do
+            "A new game wasn’t created because you already have an active game. Return to your game, or cancel it if you’re still waiting for an opponent."
+          else
+            "Your previous game just ended. Please try creating a new game."
+          end
+
+        {:noreply, assign(socket, :creation_notice, message)}
+    end
+  end
+
   defp assign_lobby_snapshot(socket, snapshot) do
     assign(socket,
       active_games_count: snapshot.active_games_count,
       recent_games: snapshot.recent_games
     )
+    |> assign_created_game()
   end
 
-  defp rules_modal(assigns) do
-    ~H"""
-    <div
-      id="rules-modal"
-      class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-3 py-3 sm:items-center sm:px-6 sm:py-6"
-    >
-      <button
-        id="rules-modal-backdrop"
-        type="button"
-        phx-click="close-rules"
-        class="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm"
-        aria-label="Close rules dialog"
-      >
-      </button>
-      <div class="relative z-10 max-h-[calc(100dvh-1.5rem)] w-full max-w-4xl overflow-y-auto rounded-lg border border-white/12 bg-zinc-950/95 p-4 shadow-[0_30px_120px_rgba(0,0,0,0.5)] sm:max-h-[calc(100dvh-3rem)] sm:p-6 lg:p-8">
-        <div class="flex items-start justify-between gap-4 sm:gap-6">
-          <div class="space-y-3">
-            <p class="inline-flex items-center gap-2 rounded-full border border-amber-300/25 bg-amber-300/8 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-amber-100">
-              <span class="h-2 w-2 rounded-full bg-amber-200"></span> Rules
-            </p>
-            <h2 class="display-copy text-2xl text-white sm:text-4xl">How Breakthrough Works</h2>
-            <p class="max-w-xl text-sm leading-7 text-zinc-300 sm:text-base">
-              White moves first. Move one pawn each turn, and win by reaching the far edge or capturing every opposing pawn.
-            </p>
-          </div>
-          <button
-            id="close-rules-button"
-            type="button"
-            phx-click="close-rules"
-            class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-zinc-200 transition hover:bg-white/10 sm:h-11 sm:w-11"
-            aria-label="Close rules"
-          >
-            <.icon name="hero-x-mark" class="size-5" />
-          </button>
-        </div>
+  defp assign_created_game(socket) do
+    created_game =
+      case GameManager.get_created_game(socket.assigns.player_token) do
+        {:ok, state} ->
+          %{
+            id: state.id,
+            mode: state.mode,
+            waiting?: state.game.status == :not_started && is_nil(state.players.black)
+          }
 
-        <div class="mt-5 grid gap-3 text-sm leading-6 text-zinc-300 sm:mt-8 sm:grid-cols-2 sm:leading-7 lg:grid-cols-4">
-          <.rules_card
-            title="Move"
-            diagram_id="rules-move-diagram"
-            squares={move_diagram()}
-          >
-            Pawns move one square straight or diagonally forward into an empty square.
-          </.rules_card>
-          <.rules_card
-            title="Capture"
-            diagram_id="rules-capture-diagram"
-            squares={capture_diagram()}
-          >
-            Capture only by moving one square diagonally forward onto an opposing pawn.
-          </.rules_card>
-          <.rules_card
-            title="Limits"
-            diagram_id="rules-limits-diagram"
-            squares={limits_diagram()}
-          >
-            Captures are optional, never chained, and a blocked pawn cannot move straight ahead.
-          </.rules_card>
-          <.rules_card title="Win" diagram_id="rules-win-diagram" squares={win_diagram()}>
-            Reach the opposite back rank or leave the opponent with no pawns.
-          </.rules_card>
-        </div>
-      </div>
-    </div>
-    """
+        {:error, :not_found} ->
+          nil
+      end
+
+    assign(socket,
+      created_game: created_game,
+      creation_notice: if(created_game, do: socket.assigns.creation_notice, else: nil)
+    )
   end
 
-  attr :title, :string, required: true
-  attr :diagram_id, :string, required: true
-  attr :squares, :list, required: true
-  slot :inner_block, required: true
-
-  defp rules_card(assigns) do
-    ~H"""
-    <div class="rounded-lg border border-white/8 bg-white/5 p-4 sm:p-5">
-      <p class="font-semibold text-white">{@title}</p>
-      <.rules_diagram id={@diagram_id} squares={@squares} />
-      <p class="mt-2">{render_slot(@inner_block)}</p>
-    </div>
-    """
-  end
-
-  attr :id, :string, required: true
-  attr :squares, :list, required: true
-
-  defp rules_diagram(assigns) do
-    ~H"""
-    <div
-      id={@id}
-      class="mx-auto mt-3 grid aspect-square w-24 grid-cols-4 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 sm:mt-4 sm:w-full"
-      aria-hidden="true"
-    >
-      <div
-        :for={square <- @squares}
-        class={[
-          "relative flex items-center justify-center border border-zinc-900/55",
-          if(square.tone == :light, do: "bg-[#b99568]", else: "bg-[#5e4436]"),
-          square.marker in [:finish, :white_finish] && "bg-emerald-300/35"
-        ]}
-      >
-        <span
-          :if={square.marker == :target}
-          class="h-6 w-6 rounded-full border border-emerald-100/70 bg-emerald-300/45 shadow-[0_0_18px_rgba(110,231,183,0.35)]"
-        >
-        </span>
-        <span
-          :if={square.marker in [:blocked, :blocked_black]}
-          class="absolute inset-2 rounded-md border border-rose-100/50 bg-rose-500/25"
-        >
-        </span>
-        <span
-          :if={square.marker == :chain}
-          class="absolute inset-3 rounded-full border-2 border-rose-100/80"
-        >
-          <span class="absolute left-1/2 top-0 h-full w-0.5 -translate-x-1/2 rotate-45 bg-rose-100/80">
-          </span>
-        </span>
-        <img
-          :if={square.marker in [:white, :white_finish]}
-          src={~p"/images/pawn.svg"}
-          alt=""
-          class="relative h-6 w-6 drop-shadow-[0_2px_2px_rgba(0,0,0,0.75)] sm:h-10 sm:w-10"
-        />
-        <img
-          :if={square.marker in [:black, :blocked_black]}
-          src={~p"/images/pawn.svg"}
-          alt=""
-          class="relative h-6 w-6 brightness-[0.28] contrast-[1.25] saturate-0 drop-shadow-[0_2px_1px_rgba(255,244,220,0.22)] sm:h-10 sm:w-10"
-        />
-      </div>
-    </div>
-    """
-  end
-
-  defp move_diagram do
-    diagram_squares(fn
-      {3, 2} -> :white
-      {2, col} when col in [1, 2, 3] -> :target
-      _coord -> nil
-    end)
-  end
-
-  defp capture_diagram do
-    diagram_squares(fn
-      {3, 2} -> :white
-      {2, col} when col in [1, 3] -> :black
-      _coord -> nil
-    end)
-  end
-
-  defp limits_diagram do
-    diagram_squares(fn
-      {4, 2} -> :white
-      {3, 2} -> :blocked_black
-      {3, 3} -> :black
-      {2, 4} -> :chain
-      _coord -> nil
-    end)
-  end
-
-  defp win_diagram do
-    diagram_squares(fn
-      {1, 3} -> :white_finish
-      {1, _col} -> :finish
-      {3, 1} -> :black
-      _coord -> nil
-    end)
-  end
-
-  defp diagram_squares(marker_fun) do
-    for row <- 1..4, col <- 1..4 do
-      %{
-        tone: if(rem(row + col, 2) == 0, do: :light, else: :dark),
-        marker: marker_fun.({row, col})
-      }
-    end
-  end
+  defp created_game_title(%{waiting?: true}), do: "Your game is waiting for an opponent"
+  defp created_game_title(%{mode: :vs_ai}), do: "You have an AI game in progress"
+  defp created_game_title(_game), do: "You have a multiplayer game in progress"
 end

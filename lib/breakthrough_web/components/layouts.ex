@@ -35,16 +35,22 @@ defmodule BreakthroughWeb.Layouts do
     default: true,
     doc: "whether to render the global flash group"
 
+  attr :compact, :boolean, default: false, doc: "use compact spacing for the playing table"
+
   slot :inner_block, required: true
 
   def app(assigns) do
     ~H"""
     <div id="app-shell" class="min-h-screen">
-      <header class="border-b border-white/10 bg-zinc-950/55 backdrop-blur">
+      <a
+        href="#main-content"
+        class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-amber-100 focus:px-4 focus:py-3 focus:text-amber-950"
+      >Skip to content</a>
+      <header class="border-b border-white/10 bg-[#101720]">
         <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <.link navigate={~p"/"} id="home-link" class="flex items-center gap-3 text-white">
-            <div class="flex h-12 w-12 items-center justify-center rounded-lg border border-white/10 bg-white/8 p-1 shadow-[0_10px_30px_rgba(0,0,0,0.18)]">
-              <img src={~p"/images/logo.svg"} alt="" class="h-full w-full" />
+            <div class="flex h-12 w-12 items-center justify-center p-1">
+              <img src={~p"/images/logo.svg"} alt="" width="48" height="48" class="h-full w-full" />
             </div>
             <div>
               <p class="display-copy text-xl">Breakthrough</p>
@@ -52,6 +58,7 @@ defmodule BreakthroughWeb.Layouts do
           </.link>
 
           <.link
+            id="source-link"
             href="https://github.com/wasichu/elixir-breakthrough"
             target="_blank"
             rel="noopener noreferrer"
@@ -63,7 +70,10 @@ defmodule BreakthroughWeb.Layouts do
         </div>
       </header>
 
-      <main class="px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
+      <main
+        id="main-content"
+        class={["px-4 sm:px-6 lg:px-8", if(@compact, do: "py-4 lg:py-6", else: "py-8 lg:py-12")]}
+      >
         <div class="mx-auto max-w-7xl space-y-4">
           {render_slot(@inner_block)}
         </div>

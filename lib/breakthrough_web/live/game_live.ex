@@ -2,6 +2,11 @@ defmodule BreakthroughWeb.GameLive do
   use BreakthroughWeb, :live_view
 
   alias Breakthrough.Game
+  import BreakthroughWeb.RulesComponents, only: [rules_modal: 1]
+
+  import BreakthroughWeb.MatchComponents,
+    only: [share_controls: 1, player_strip: 1, resign_dialog: 1]
+
   alias Breakthrough.Games.GameManager
   alias Breakthrough.Games.GameServer
 
@@ -10,29 +15,23 @@ defmodule BreakthroughWeb.GameLive do
     socket =
       socket
       |> assign(:current_scope, nil)
+      |> assign(:show_rules_modal, false)
+      |> assign(:show_resign_dialog, false)
+      |> assign(:show_guidance?, true)
+      |> assign(:expiry_notice, nil)
       |> assign(:game_id, game_id)
       |> assign(:player_token, player_token)
 
-    case GameManager.join_game(game_id, player_token) do
-      {:ok, player_side, state} ->
-        state =
-          if connected?(socket) do
-            Phoenix.PubSub.subscribe(Breakthrough.PubSub, GameServer.topic(game_id))
-            {:ok, state} = GameManager.track_connection(game_id, player_token, self())
-            state
-          else
-            state
-          end
-
-        {:ok,
-         socket
-         |> assign(:player_side, player_side)
-         |> assign(:selected_square, nil)
-         |> assign(:legal_targets, MapSet.new())
-         |> assign(:copy_status, "Copy")
-         |> assign(:game_expired, false)
-         |> assign_multiplayer_state(state)}
-
+    with {:ok, player_side, state} <- GameManager.join_game(game_id, player_token),
+         {:ok, state} <- connect_to_game(socket, state) do
+      {:ok,
+       socket
+       |> assign(:player_side, player_side)
+       |> assign(:selected_square, nil)
+       |> assign(:legal_targets, MapSet.new())
+       |> assign(:game_expired, false)
+       |> assign_multiplayer_state(state)}
+    else
       {:error, :not_found} ->
         {:ok,
          socket
@@ -43,27 +42,86 @@ defmodule BreakthroughWeb.GameLive do
 
   @impl true
   def handle_event("select-square", %{"row" => row, "col" => col}, socket) do
-    coord = {String.to_integer(row), String.to_integer(col)}
+    with {:ok, row} <- board_index(row), {:ok, col} <- board_index(col) do
+      coord = {row, col}
 
-    socket =
-      cond do
-        socket.assigns.selected_square == coord ->
-          clear_local_selection(socket)
+      socket =
+        cond do
+          socket.assigns.selected_square == coord ->
+            clear_local_selection(socket)
 
-        selectable_piece?(socket.assigns, coord) ->
-          select_square(socket, coord)
+          selectable_piece?(socket.assigns, coord) ->
+            select_square(socket, coord)
 
-        move_allowed?(socket.assigns, coord) ->
-          make_move(socket, coord)
+          move_allowed?(socket.assigns, coord) ->
+            make_move(socket, coord)
 
-        should_clear_selection?(socket.assigns) ->
-          clear_local_selection(socket)
+          should_clear_selection?(socket.assigns) ->
+            clear_local_selection(socket)
 
-        true ->
-          socket
-      end
+          true ->
+            socket
+        end
 
-    {:noreply, socket}
+      {:noreply, socket}
+    else
+      _ -> {:noreply, put_flash(socket, :error, "Choose a square on the board.")}
+    end
+  end
+
+  def handle_event("select-square", _params, socket) do
+    {:noreply, put_flash(socket, :error, "Choose a square on the board.")}
+  end
+
+  def handle_event("dismiss-guidance", _params, socket) do
+    {:noreply, assign(socket, :show_guidance?, false)}
+  end
+
+  def handle_event("clear-selection", _params, socket) do
+    {:noreply, clear_local_selection(socket)}
+  end
+
+  def handle_event("request-resign", _params, socket) do
+    {:noreply,
+     assign(
+       socket,
+       :show_resign_dialog,
+       show_resign_button?(
+         socket.assigns.game,
+         socket.assigns.player_side,
+         socket.assigns.players
+       )
+     )}
+  end
+
+  def handle_event("close-resign", _params, socket) do
+    {:noreply, assign(socket, :show_resign_dialog, false)}
+  end
+
+  def handle_event("open-rules", _params, socket) do
+    {:noreply, assign(socket, :show_rules_modal, true)}
+  end
+
+  def handle_event("close-rules", _params, socket) do
+    {:noreply, assign(socket, :show_rules_modal, false)}
+  end
+
+  def handle_event("cancel-game", _params, socket) do
+    case GameManager.cancel_game(socket.assigns.game_id, socket.assigns.player_token) do
+      :ok ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Waiting game cancelled. You can start a new match.")
+         |> push_navigate(to: ~p"/")}
+
+      {:error, _reason} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "This game can no longer be cancelled. Resign to end your game."
+         )}
+    end
   end
 
   def handle_event("resign-game", _params, socket) do
@@ -71,6 +129,7 @@ defmodule BreakthroughWeb.GameLive do
       {:ok, state} ->
         {:noreply,
          socket
+         |> assign(:show_resign_dialog, false)
          |> clear_local_selection()
          |> assign_multiplayer_state(state)}
 
@@ -96,6 +155,15 @@ defmodule BreakthroughWeb.GameLive do
       {:pending, state} ->
         {:noreply, assign_multiplayer_state(socket, state)}
 
+      {:error, {:active_game, game_id}} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           "You already have an active game. Finish it before starting a rematch."
+         )
+         |> push_navigate(to: ~p"/games/#{game_id}")}
+
       {:error, :spectator} ->
         {:noreply, put_flash(socket, :error, "Spectators cannot start a rematch.")}
 
@@ -119,13 +187,29 @@ defmodule BreakthroughWeb.GameLive do
      |> sync_local_selection()}
   end
 
+  def handle_info({:game_expired, :cancelled}, socket) do
+    {:noreply,
+     socket
+     |> put_flash(:info, "Waiting game cancelled. You can start a new match.")
+     |> push_navigate(to: ~p"/")}
+  end
+
   @impl true
   def handle_info({:game_expired, reason}, socket) do
     {:noreply,
      socket
-     |> clear_local_selection()
-     |> put_flash(:error, game_expired_message(reason))
-     |> push_navigate(to: ~p"/")}
+     |> assign(
+       game_expired: true,
+       phase: "Expired",
+       turn: "–",
+       expiry_notice: game_expired_message(reason),
+       can_interact?: false,
+       show_resign_dialog: false,
+       table_title: "This game has expired",
+       table_detail:
+         "The final position is kept here so you can review it. Return to the lobby to start a new match."
+     )
+     |> clear_local_selection()}
   end
 
   @impl true
@@ -136,77 +220,149 @@ defmodule BreakthroughWeb.GameLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div id="game-shell" class="grid gap-8 lg:grid-cols-[minmax(0,1.25fr)_20rem]">
-        <section>
-          <section
-            id="board-panel"
-            class="mx-auto w-full max-w-[48rem] rounded-lg border border-white/10 bg-zinc-950/45 p-4 shadow-[0_30px_80px_rgba(0,0,0,0.28)] backdrop-blur sm:p-6"
+    <Layouts.app flash={@flash} current_scope={@current_scope} compact>
+      <div id="game-shell" class="match-table">
+        <header class="match-heading">
+          <.link navigate={~p"/"} id="back-to-lobby" class="match-back-link">
+            <.icon name="hero-arrow-left" class="size-4" /> Lobby
+          </.link>
+          <h1 class="display-copy text-xl text-stone-100 sm:text-2xl">
+            {if @mode == :vs_ai, do: "Play vs AI", else: "Multiplayer"}
+          </h1>
+          <p class="match-role">
+            <span id="player-side-value" data-side={@player_side} class="font-semibold text-stone-100">{if @player_side ==
+                                                                                                             :spectator,
+                                                                                                           do:
+                                                                                                             "Spectator",
+                                                                                                           else:
+                                                                                                             "You · #{@player_side_label}"}</span>
+          </p>
+        </header>
+
+        <section id="game-status-panel" class="match-state" aria-labelledby="phase-value">
+          <div id="turn-summary" aria-live="polite" aria-atomic="true">
+            <h2
+              id="phase-value"
+              data-phase={@phase}
+              class="display-copy text-3xl text-stone-100 sm:text-4xl"
+            >
+              {@table_title}
+            </h2>
+            <p id="board-prompt" class="mt-2 max-w-prose text-sm leading-6 text-stone-300">
+              {@table_detail}
+            </p>
+          </div>
+          <p :if={@finish_notice} id="finish-note" class="mt-2 text-sm text-amber-100">
+            {@finish_notice}
+          </p>
+          <p :if={@disconnect_notice} id="presence-note" role="status" class="match-presence-note">
+            {@disconnect_notice}
+          </p>
+          <p :if={@game_expired} id="expired-game-note" class="match-presence-note">
+            {@expiry_notice}
+          </p>
+          <div
+            :if={@game.status == :finished && !@game_expired}
+            id="match-result-actions"
+            class="mt-5 flex flex-wrap items-center gap-3"
           >
-            <div class="mb-4 flex items-center justify-between gap-4">
-              <div class="min-w-0">
-                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">
-                  Board
-                </p>
-                <p id="turn-summary" class="mt-1 truncate text-sm font-semibold text-zinc-100">
-                  {@board_prompt || @phase}
-                </p>
-              </div>
-              <button
-                :if={show_resign_button?(@game, @player_side)}
-                id="resign-game-button"
-                type="button"
-                phx-click="resign-game"
-                class="inline-flex items-center gap-2 rounded-full border border-rose-300/40 bg-rose-300/10 px-4 py-2 text-sm font-semibold text-rose-100 transition hover:border-rose-200 hover:bg-rose-300/20"
-              >
-                <.icon name="hero-flag" class="size-4" /> Resign
-              </button>
-              <button
-                :if={show_rematch_button?(@game, @player_side, @rematch_votes)}
-                id="rematch-game-button"
-                type="button"
-                phx-click="rematch-game"
-                class="inline-flex items-center gap-2 rounded-full border border-emerald-300/40 bg-emerald-300/10 px-4 py-2 text-sm font-semibold text-emerald-100 transition hover:border-emerald-200 hover:bg-emerald-300/20"
-              >
-                <.icon name="hero-arrow-path-rounded-square" class="size-4" /> Rematch
-              </button>
-              <div
-                :if={show_rematch_pending?(@game, @player_side, @rematch_votes)}
-                id="rematch-pending-indicator"
-                class="inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/8 px-4 py-2 text-sm font-semibold text-emerald-100"
-              >
-                <.icon name="hero-check-circle" class="size-4" /> Rematch requested
-              </div>
+            <button
+              :if={show_rematch_button?(@game, @player_side, @rematch_votes)}
+              id="rematch-game-button"
+              type="button"
+              phx-click="rematch-game"
+              phx-disable-with="Requesting…"
+              class="play-button play-button-primary"
+            >
+              <.icon name="hero-arrow-path-rounded-square" class="size-4" />
+              {rematch_button_label(@mode, @player_side, @rematch_votes)}
+            </button>
+            <span
+              :if={show_rematch_pending?(@game, @player_side, @rematch_votes)}
+              id="rematch-pending-indicator"
+              class="text-sm text-amber-100"
+            >Rematch requested</span>
+            <.link navigate={~p"/"} id="result-lobby-link" class="play-button play-button-secondary">Back to lobby</.link>
+          </div>
+          <p :if={@rematch_notice} id="rematch-note" role="status" class="mt-3 text-sm text-amber-100">
+            {@rematch_notice}
+          </p>
+          <.link
+            :if={@game_expired}
+            navigate={~p"/"}
+            id="expired-lobby-link"
+            class="play-button play-button-primary mt-4"
+          >Back to lobby</.link>
+          <.share_controls
+            :if={@awaiting_opponent? && @player_side == :white && !@game_expired}
+            share_url={@share_url}
+          />
+          <button
+            :if={@awaiting_opponent? && @player_side == :white && !@game_expired}
+            id="cancel-game-button"
+            type="button"
+            phx-click="cancel-game"
+            class="play-button play-button-quiet mt-2"
+          >Cancel waiting game</button>
+        </section>
+
+        <section id="board-panel" aria-label="Playing table">
+          <div id="players-panel" class="match-players" aria-label="Players">
+            <.player_strip
+              label={player_label(@far_side)}
+              side={@far_side}
+              token={@players[@far_side]}
+              current_token={@player_token}
+              connected?={@player_presence[@far_side]}
+              current?={
+                @turn_side == @far_side && !@awaiting_opponent? && @game.status != :finished &&
+                  !@game_expired
+              }
+              count={pawn_count(@game, @far_side)}
+              winner?={@game.winner == @far_side}
+            />
+          </div>
+          <div class="match-board-frame">
+            <div id="board-files" class="board-coordinate-row" aria-hidden="true">
+              <span></span><span :for={file <- @files}>{file}</span>
             </div>
-
-            <div class="overflow-hidden rounded-lg border border-white/8 bg-zinc-950/70 p-3 sm:p-4">
-              <div class="mb-3 grid grid-cols-[1.5rem_repeat(8,minmax(0,1fr))] gap-2 text-center text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                <span></span>
-                <span :for={file <- @files}>{file}</span>
-              </div>
-
+            <p id="board-keyboard-help" class="sr-only">
+              Use arrow keys to explore the board, Home and End for the row, Control Home and Control End for the board. Press Enter or Space to select a pawn or destination. Escape clears your selection. You can explore while waiting or watching.
+            </p>
+            <div
+              id="breakthrough-board"
+              phx-hook="BoardDrag"
+              role="grid"
+              aria-label="Breakthrough board"
+              aria-describedby="board-keyboard-help"
+              aria-rowcount="8"
+              aria-colcount="8"
+              data-can-drag={to_string(@can_interact?)}
+              data-entry-square={@entry_square_id}
+            >
               <div
-                id="breakthrough-board"
-                phx-hook="BoardDrag"
-                class="space-y-2"
-                data-can-drag={to_string(@can_interact?)}
+                :for={{row, row_index} <- Enum.with_index(@board_rows)}
+                role="row"
+                aria-rowindex={row_index + 1}
+                class="board-row"
               >
+                <div class="board-rank" aria-hidden="true">{hd(row).rank}</div>
                 <div
-                  :for={row <- @board_rows}
-                  class="grid grid-cols-[1.5rem_repeat(8,minmax(0,1fr))] gap-2"
+                  :for={{square, col_index} <- Enum.with_index(row)}
+                  role="gridcell"
+                  aria-colindex={col_index + 1}
+                  class="board-cell"
                 >
-                  <div class="flex items-center justify-center text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    {hd(row).rank}
-                  </div>
                   <button
-                    :for={square <- row}
                     id={"square-#{square.id}"}
                     type="button"
                     phx-click="select-square"
                     phx-value-row={square.row}
                     phx-value-col={square.col}
+                    tabindex={if square.id == @entry_square_id, do: "0", else: "-1"}
                     aria-pressed={to_string(square.selected?)}
-                    disabled={!@can_interact?}
+                    aria-disabled={to_string(!@can_interact?)}
+                    aria-label={square.accessible_label}
                     data-row={square.row}
                     data-col={square.col}
                     data-selected={to_string(square.selected?)}
@@ -215,160 +371,320 @@ defmodule BreakthroughWeb.GameLive do
                     data-own-piece={to_string(square.piece == @player_side)}
                     data-legal-move={to_string(square.legal_move?)}
                     data-piece={square.piece_code || "empty"}
+                    data-finish-square={to_string(winning_square?(@game, {square.row, square.col}))}
                     class={[
-                      "group aspect-square rounded-2xl border text-sm font-semibold transition duration-150 ease-out focus:outline-none focus:ring-2 focus:ring-amber-200/70",
-                      square.tone == :light &&
-                        "border-amber-950/30 bg-[#9f7a50] text-stone-950 hover:bg-[#af8960]",
-                      square.tone == :dark &&
-                        "border-[#2d1f1a]/50 bg-[#5c4033] text-stone-100 hover:bg-[#6a4a3b]",
-                      square.last_move? &&
-                        "ring-2 ring-sky-300/70 ring-offset-0 shadow-[0_0_0_1px_rgba(125,211,252,0.25)]",
-                      square.selected? &&
-                        "scale-[0.96] border-amber-200 bg-amber-200 text-zinc-950 shadow-[0_0_0_1px_rgba(251,191,36,0.3)]",
-                      square.legal_move? && "ring-2 ring-emerald-300/60 ring-offset-0"
+                      "board-square group",
+                      square.tone == :light && "board-square-light",
+                      square.tone == :dark && "board-square-dark",
+                      square.last_move? && "board-square-last",
+                      square.selected? && "board-square-selected",
+                      square.legal_move? && "board-square-legal"
                     ]}
                   >
                     <span class="sr-only">{square.accessible_label}</span>
-                    <span :if={square.piece} class="inline-flex items-center justify-center">
-                      <img
-                        src={~p"/images/pawn.svg"}
-                        alt=""
-                        aria-hidden="true"
-                        class={[
-                          "h-12 w-12 transition duration-150 ease-out group-hover:scale-105 sm:h-14 sm:w-14",
-                          square.piece == :white &&
-                            "drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]",
-                          square.piece == :black &&
-                            "brightness-[0.32] contrast-[1.2] saturate-0 drop-shadow-[0_1px_0_rgba(255,244,220,0.22)]"
-                        ]}
-                      />
-                    </span>
+                    <img
+                      :if={square.piece}
+                      src={~p"/images/pawn.svg"}
+                      width="56"
+                      height="56"
+                      alt=""
+                      aria-hidden="true"
+                      class={["board-pawn", square.piece == :black && "board-pawn-black"]}
+                    />
                   </button>
                 </div>
               </div>
             </div>
-            <div
-              :if={@board_prompt}
-              id="board-prompt"
-              class="mt-4 rounded-2xl border border-white/8 bg-white/6 px-4 py-3 text-center text-sm font-semibold tracking-[0.08em] text-zinc-100"
-            >
-              {@board_prompt}
-            </div>
-          </section>
+          </div>
+          <.player_strip
+            label={player_label(@near_side)}
+            side={@near_side}
+            token={@players[@near_side]}
+            current_token={@player_token}
+            connected?={@player_presence[@near_side]}
+            current?={
+              @turn_side == @near_side && !@awaiting_opponent? && @game.status != :finished &&
+                !@game_expired
+            }
+            count={pawn_count(@game, @near_side)}
+            winner?={@game.winner == @near_side}
+          />
+          <p
+            id="selection-announcement"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            class="match-selection"
+          >
+            {@selection_announcement}
+          </p>
+          <p id="move-announcement" class="sr-only" aria-live="polite" aria-atomic="true">
+            {@last_move_announcement}
+          </p>
         </section>
 
-        <aside class="space-y-4">
-          <section
-            id="game-status-panel"
-            class="rounded-lg border border-white/10 bg-white/6 p-5 backdrop-blur"
-          >
-            <div class="flex items-center justify-between">
-              <div>
-                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">
-                  Match Status
-                </p>
-                <p id="phase-value" data-phase={@phase} class="mt-2 text-2xl font-semibold text-white">
-                  {@phase}
-                </p>
-                <p :if={@finish_notice} id="finish-note" class="mt-2 text-sm text-amber-100">
-                  {@finish_notice}
-                </p>
-                <p :if={@rematch_notice} id="rematch-note" class="mt-2 text-sm text-emerald-100">
-                  {@rematch_notice}
-                </p>
-                <p :if={@disconnect_notice} id="presence-note" class="mt-2 text-sm text-amber-100">
-                  {@disconnect_notice}
-                </p>
-              </div>
-              <span class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-emerald-300/25 bg-emerald-300/10 text-emerald-200">
-                <.icon name="hero-users" class="size-5" />
-              </span>
-            </div>
+        <section
+          :if={@show_guidance? && @game.status != :finished && !@game_expired}
+          id="match-guidance"
+          class="match-guidance"
+          aria-labelledby="guidance-title"
+        >
+          <div>
+            <h2 id="guidance-title" class="font-semibold text-stone-100">A race to the far edge.</h2>
+            <p class="mt-1 text-sm leading-6 text-stone-300">
+              Move one square forward or diagonally into an empty square. Capture diagonally forward. Reach the opposite back rank to win.
+            </p>
+          </div>
+          <button
+            id="dismiss-guidance-button"
+            type="button"
+            phx-click="dismiss-guidance"
+            class="match-icon-button"
+            aria-label="Dismiss playing hint"
+          ><.icon name="hero-x-mark" class="size-4" /></button>
+        </section>
 
-            <dl class="mt-5 grid gap-3 text-sm text-zinc-300">
-              <div class="rounded-lg border border-white/8 bg-black/20 p-4">
-                <dt class="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">
-                  You Are
-                </dt>
-                <dd id="player-side-value" data-side={@player_side} class="mt-1 text-lg text-white">
-                  {@player_side_label}
-                </dd>
-              </div>
-              <div class="rounded-lg border border-white/8 bg-black/20 p-4">
-                <dt class="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">Turn</dt>
-                <dd id="turn-value" data-turn={@turn} class="mt-1 text-lg text-white">{@turn}</dd>
-              </div>
-              <div class="rounded-lg border border-white/8 bg-black/20 p-4">
-                <dt class="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">
-                  Share Link
-                </dt>
-                <dd
-                  id="share-link-panel"
-                  phx-hook="ShareLink"
-                  phx-update="ignore"
-                  data-share-url={@share_url}
-                  class="mt-2 space-y-3"
-                >
-                  <input
-                    id="game-share-link"
-                    type="text"
-                    readonly
-                    value={@share_url}
-                    class="w-full rounded-xl border border-white/10 bg-zinc-950/80 px-3 py-2 text-sm text-amber-100"
-                  />
-                  <button
-                    id="copy-link-button"
-                    type="button"
-                    phx-hook="CopyText"
-                    data-copy-target="#game-share-link"
-                    class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-zinc-200 transition hover:bg-white/10"
-                  >
-                    <.icon name="hero-clipboard-document" class="size-4" />
-                    <span>{@copy_status}</span>
-                  </button>
-                </dd>
-              </div>
-            </dl>
-          </section>
+        <div class="match-tools">
+          <button
+            id="game-rules-button"
+            type="button"
+            phx-click={JS.push_focus() |> JS.push("open-rules")}
+            aria-haspopup="dialog"
+            class="play-button play-button-quiet"
+          ><.icon name="hero-book-open" class="size-4" /> How to play</button>
+          <details id="keyboard-instructions" class="match-disclosure">
+            <summary>Keyboard controls</summary>
+            <p class="text-sm leading-6 text-stone-300">
+              Arrow keys explore the board. Enter or Space selects and moves. Escape clears a selection. Home and End move across a row; hold Control to reach the first or last square.
+            </p>
+          </details>
 
-          <section
-            id="players-panel"
-            class="rounded-lg border border-white/10 bg-zinc-950/45 p-5 backdrop-blur"
+          <button
+            :if={show_resign_button?(@game, @player_side, @players) && !@game_expired}
+            id="resign-game-button"
+            type="button"
+            phx-click={JS.push_focus() |> JS.push("request-resign")}
+            aria-haspopup="dialog"
+            class="play-button match-resign-button"
+          >Resign</button>
+        </div>
+
+        <details
+          :if={@mode == :pvp && !(@awaiting_opponent? && @player_side == :white) && !@game_expired}
+          id="share-details"
+          class="match-disclosure match-share-disclosure"
+        >
+          <summary>Share this game</summary>
+          <p class="mt-2 text-sm text-stone-300">
+            Send the link to a friend. When both seats are taken, visitors can watch.
+          </p>
+          <.share_controls share_url={@share_url} />
+        </details>
+
+        <section id="recent-moves-panel" class="match-history" aria-labelledby="recent-moves-title">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h2 id="recent-moves-title" class="display-copy text-xl text-stone-100">Recent moves</h2>
+            <span class="text-sm tabular-nums text-stone-400">{@move_count} moves</span>
+          </div>
+          <ol :if={@move_count > 0} id="recent-moves" class="match-move-list">
+            <li :for={move <- @recent_moves} id={"move-#{move.number}"} class="match-move">
+              <span class="tabular-nums text-stone-400">{move.number}.</span>
+              <span
+                class={["match-mini-pawn", move.player == :black && "match-mini-pawn-black"]}
+                aria-hidden="true"
+              ></span>
+              <span class="sr-only">{player_label(move.player)}</span>
+              <span>{move.from}</span><.icon
+                name={if move.capture?, do: "hero-x-mark", else: "hero-arrow-right"}
+                class="size-3 text-stone-400"
+              /><span>{move.to}</span>
+              <span :if={move.capture?} class="sr-only">capture</span>
+            </li>
+          </ol>
+          <p
+            :if={@move_count == 0}
+            id="moves-empty-state"
+            class="mt-3 text-sm leading-6 text-stone-400"
           >
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">Seats</p>
-            <div class="mt-4 space-y-3 text-sm text-zinc-300">
-              <div
-                id="white-seat-status"
-                class="flex items-center justify-between gap-3 rounded-lg border border-white/8 bg-white/5 px-4 py-3"
-              >
-                <span>
-                  White: {seat_status(@players.white, @player_token, @player_presence.white)}
-                </span>
-                <span class="h-3 w-3 rounded-full bg-stone-100 shadow-[0_0_0_1px_rgba(0,0,0,0.65)]">
-                </span>
-              </div>
-              <div
-                id="black-seat-status"
-                class="flex items-center justify-between gap-3 rounded-lg border border-white/8 bg-white/5 px-4 py-3"
-              >
-                <span>
-                  Black: {seat_status(@players.black, @player_token, @player_presence.black)}
-                </span>
-                <span class="h-3 w-3 rounded-full bg-zinc-950 shadow-[0_0_0_1px_rgba(255,255,255,0.35)]">
-                </span>
-              </div>
-              <div id="spectator-count" class="rounded-lg border border-white/8 bg-white/5 px-4 py-3">
-                Spectators: {@spectator_count}
-              </div>
-              <div class="rounded-lg border border-white/8 bg-white/5 px-4 py-3">
-                Move no: {length(@game.move_history)}
-              </div>
-            </div>
-          </section>
-        </aside>
+            {if @game.status == :finished || @game_expired,
+              do: "No moves were played.",
+              else: "No moves yet. White moves first."}
+          </p>
+        </section>
+        <footer class="match-footer">
+          <p id="spectator-count">Spectators: {@spectator_count}</p>
+          <p id="turn-value" data-turn={@turn} class="sr-only">{@turn}</p>
+          <p>Match <span class="select-all">{@game_id}</span></p>
+        </footer>
       </div>
+      <.rules_modal :if={@show_rules_modal} />
+      <.resign_dialog :if={@show_resign_dialog} opponent_label={player_label(opponent(@player_side))} />
     </Layouts.app>
     """
+  end
+
+  defp assign_table_state(socket) do
+    assigns = socket.assigns
+    game = assigns.game
+    near_side = if assigns.player_side == :black, do: :black, else: :white
+    waiting? = not seats_ready?(assigns.players)
+    squares = List.flatten(assigns.board_rows)
+
+    entry =
+      Enum.find(squares, & &1.selected?) ||
+        Enum.find(squares, &(&1.piece == assigns.player_side)) || hd(squares)
+
+    move_count = length(game.move_history)
+
+    recent_moves =
+      game.move_history
+      |> Enum.with_index(1)
+      |> Enum.take(-6)
+      |> Enum.map(fn {move, number} ->
+        %{
+          number: number,
+          player: move.player,
+          from: public_coordinate(move.from),
+          to: public_coordinate(move.to),
+          capture?: move.capture?
+        }
+      end)
+
+    assign(socket,
+      near_side: near_side,
+      far_side: opponent(near_side),
+      awaiting_opponent?: waiting?,
+      turn_side: game.current_player,
+      entry_square_id: entry.id,
+      table_title: table_title(game, assigns.player_side, waiting?, assigns.game_expired),
+      table_detail: table_detail(game, assigns.player_side, waiting?, assigns.game_expired),
+      selection_announcement:
+        selection_announcement(
+          assigns.selected_square,
+          assigns.legal_targets,
+          assigns.can_interact?,
+          assigns.game_expired || game.status == :finished
+        ),
+      move_count: move_count,
+      recent_moves: recent_moves,
+      last_move_announcement: last_move_announcement(List.last(game.move_history))
+    )
+  end
+
+  defp table_title(_game, _side, _waiting?, true), do: "This game has expired"
+
+  defp table_title(%{status: :finished} = game, side, _waiting?, false),
+    do: phase_label(game, side, %{})
+
+  defp table_title(_game, :white, true, false), do: "Invite a friend to play"
+  defp table_title(_game, _side, true, false), do: "Waiting for a player"
+  defp table_title(%{current_player: side}, side, false, false), do: "Your move"
+  defp table_title(game, _side, false, false), do: "#{player_label(game.current_player)} to move"
+
+  defp table_detail(_game, _side, _waiting?, true),
+    do:
+      "The final position is kept here so you can review it. Return to the lobby to start a new match."
+
+  defp table_detail(%{status: :finished} = game, _side, _waiting?, false),
+    do: outcome_description(game)
+
+  defp table_detail(_game, :white, true, false),
+    do: "You have White. Share this link to invite a friend to play Black."
+
+  defp table_detail(_game, _side, true, false),
+    do: "The game starts when both players have joined."
+
+  defp table_detail(_game, :spectator, false, false),
+    do: "You’re watching. Follow each move as the players race to the far edge."
+
+  defp table_detail(%{current_player: side}, side, false, false),
+    do: "Select a pawn, then a marked destination. Tap to play, or use the keyboard."
+
+  defp table_detail(_game, _side, false, false),
+    do: "Your opponent is choosing a move. You can explore the board while you wait."
+
+  defp outcome_description(%{winner: winner, finish_reason: {:resignation, _}}),
+    do: "#{player_label(winner)} wins by resignation."
+
+  defp outcome_description(%{winner: winner} = game) when winner in [:white, :black] do
+    case List.last(game.move_history) do
+      %{to: {row, _col} = to} when row in [1, 8] ->
+        "#{player_label(winner)} reached the back rank on #{public_coordinate(to)}."
+
+      _ ->
+        "#{player_label(winner)} captured every opposing pawn."
+    end
+  end
+
+  defp outcome_description(_game), do: "This game has ended."
+
+  defp selection_announcement(_selected, _targets, _can_interact?, true),
+    do: "You can still explore the final board."
+
+  defp selection_announcement(nil, _targets, true, false),
+    do: "Choose one of your pawns to see its legal moves."
+
+  defp selection_announcement(nil, _targets, false, false),
+    do: "Explore with arrow keys. Moves are available on your turn."
+
+  defp selection_announcement(selected, targets, _can_interact?, false) do
+    destinations = targets |> Enum.map(&public_coordinate/1) |> Enum.sort() |> Enum.join(", ")
+
+    if destinations == "",
+      do:
+        "#{public_coordinate(selected)} is selected. This pawn has no legal moves. Escape clears the selection.",
+      else:
+        "#{public_coordinate(selected)} selected. Legal destinations: #{destinations}. Escape clears the selection."
+  end
+
+  defp square_accessible_label(coord, piece, targets, selected, last_move) do
+    [
+      accessible_label(coord, piece),
+      coord == selected && "selected",
+      MapSet.member?(targets, coord) && if(piece, do: "legal capture", else: "legal destination"),
+      MapSet.member?(last_move, coord) && "last move"
+    ]
+    |> Enum.filter(& &1)
+    |> Enum.join(", ")
+  end
+
+  defp public_coordinate({row, col}), do: "#{file_label(col)}#{display_rank(row, :white)}"
+  defp pawn_count(game, side), do: Enum.count(game.board, fn {_coord, piece} -> piece == side end)
+  defp last_move_announcement(nil), do: "No moves yet. White moves first."
+
+  defp last_move_announcement(move),
+    do:
+      "#{player_label(move.player)} moved from #{public_coordinate(move.from)} to #{public_coordinate(move.to)}#{if move.capture?, do: ", capturing a pawn", else: ""}."
+
+  defp winning_square?(%{winner: winner, finish_reason: nil, move_history: moves}, coord)
+       when winner in [:white, :black], do: match?(%{to: ^coord}, List.last(moves))
+
+  defp winning_square?(_game, _coord), do: false
+  defp rematch_button_label(:vs_ai, _side, _votes), do: "Play again"
+
+  defp rematch_button_label(_mode, side, votes),
+    do:
+      if(MapSet.size(votes) > 0 && !MapSet.member?(votes, side),
+        do: "Accept rematch",
+        else: "Request rematch"
+      )
+
+  defp board_index(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {index, ""} when index in 1..8 -> {:ok, index}
+      _ -> :error
+    end
+  end
+
+  defp board_index(_value), do: :error
+
+  defp connect_to_game(socket, state) do
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(Breakthrough.PubSub, GameServer.topic(state.id))
+      GameManager.track_connection(state.id, socket.assigns.player_token, self())
+    else
+      {:ok, state}
+    end
   end
 
   defp make_move(socket, to) do
@@ -388,6 +704,14 @@ defmodule BreakthroughWeb.GameLive do
 
       {:error, :not_your_turn} ->
         put_flash(socket, :error, "Wait for your turn.")
+
+      {:error, :not_ready} ->
+        put_flash(socket, :error, "Wait for an opponent to join.")
+
+      {:error, :not_found} ->
+        socket
+        |> put_flash(:error, "That game is no longer available.")
+        |> push_navigate(to: ~p"/")
 
       {:error, :invalid_move} ->
         put_flash(socket, :error, "That move is not legal.")
@@ -417,6 +741,7 @@ defmodule BreakthroughWeb.GameLive do
 
     assign(socket,
       game: state.game,
+      show_resign_dialog: socket.assigns.show_resign_dialog && state.game.status != :finished,
       players: state.players,
       mode: state.mode,
       files: file_labels(player_side),
@@ -427,14 +752,12 @@ defmodule BreakthroughWeb.GameLive do
           socket.assigns[:selected_square],
           player_side
         ),
-      selected_square_id: maybe_square_id(socket.assigns[:selected_square]),
       phase: phase_label(state.game, player_side, state.players),
       turn: turn_label(state.game),
       player_side_label: player_side_label(player_side),
       can_interact?:
         not socket.assigns[:game_expired] and
           can_interact?(state.game, player_side, state.players),
-      board_prompt: board_prompt(state.game, player_side, state.players),
       finish_notice: finish_notice(state.game, player_side),
       rematch_notice: rematch_notice(state, player_side),
       rematch_votes: state.rematch_votes,
@@ -443,6 +766,7 @@ defmodule BreakthroughWeb.GameLive do
       spectator_count: state.spectator_count,
       share_url: url(~p"/games/#{socket.assigns.game_id}")
     )
+    |> assign_table_state()
   end
 
   defp sync_local_selection(socket) do
@@ -469,9 +793,9 @@ defmodule BreakthroughWeb.GameLive do
           socket.assigns.legal_targets,
           socket.assigns.selected_square,
           socket.assigns.player_side
-        ),
-      selected_square_id: maybe_square_id(socket.assigns.selected_square)
+        )
     )
+    |> assign_table_state()
   end
 
   defp selectable_piece?(assigns, coord) do
@@ -506,34 +830,29 @@ defmodule BreakthroughWeb.GameLive do
           last_move?: MapSet.member?(last_move_squares, coord),
           selected?: selected_square == coord,
           legal_move?: MapSet.member?(legal_targets, coord),
-          accessible_label: accessible_label(coord, piece)
+          accessible_label:
+            square_accessible_label(
+              coord,
+              piece,
+              legal_targets,
+              selected_square,
+              last_move_squares
+            )
         }
       end)
     end)
   end
-
-  defp seat_status(:ai, _current_token, _connected?), do: "AI"
-  defp seat_status(nil, _current_token, _connected?), do: "Open"
-  defp seat_status(token, token, _connected?), do: "You"
-  defp seat_status(_token, _current_token, true), do: "Claimed"
-  defp seat_status(_token, _current_token, false), do: "Disconnected"
 
   defp player_side_label(:white), do: "White"
   defp player_side_label(:black), do: "Black"
   defp player_side_label(:spectator), do: "Spectator"
 
   defp file_label(col), do: <<?a + col - 1>>
-  defp file_labels(:black), do: Enum.map(8..1//-1, &display_file_label(&1, :black))
-
-  defp file_labels(_player_side),
-    do: Enum.map(1..Game.board_size(), &display_file_label(&1, :white))
+  defp file_labels(player_side), do: Enum.map(col_order(player_side), &file_label/1)
 
   defp square_tone(row, col) when rem(row + col, 2) == 0, do: :light
   defp square_tone(_row, _col), do: :dark
-  defp display_rank(row, :black), do: row
   defp display_rank(row, _player_side), do: Game.board_size() - row + 1
-  defp display_file_label(col, :black), do: file_label(Game.board_size() - col + 1)
-  defp display_file_label(col, _player_side), do: file_label(col)
   defp row_order(:black), do: 8..1//-1
   defp row_order(_player_side), do: 1..8
   defp col_order(:black), do: 8..1//-1
@@ -546,8 +865,6 @@ defmodule BreakthroughWeb.GameLive do
   end
 
   defp square_id({row, col}), do: "#{file_label(col)}#{row}"
-  defp maybe_square_id(nil), do: nil
-  defp maybe_square_id(coord), do: square_id(coord)
 
   defp can_interact?(%{winner: winner}, _player_side, _players) when winner in [:white, :black],
     do: false
@@ -589,7 +906,7 @@ defmodule BreakthroughWeb.GameLive do
         "#{player_label(side)} disconnected."
 
       [_white, _black] when game.move_history != [] ->
-        "Both players disconnected. This game will expire in 5 seconds."
+        "Both players disconnected. This game will expire soon."
 
       _both_open_or_unstarted ->
         nil
@@ -606,8 +923,9 @@ defmodule BreakthroughWeb.GameLive do
   defp piece_code(:white), do: "W"
   defp piece_code(:black), do: "B"
 
-  defp show_resign_button?(%{status: status}, player_side) do
-    status == :in_progress and player_side in [:white, :black]
+  defp show_resign_button?(%{status: status}, player_side, players) do
+    status in [:not_started, :in_progress] and player_side in [:white, :black] and
+      seats_ready?(players)
   end
 
   defp show_rematch_button?(%{status: :finished}, player_side, rematch_votes)
@@ -622,29 +940,11 @@ defmodule BreakthroughWeb.GameLive do
 
   defp show_rematch_pending?(_game, _player_side, _rematch_votes), do: false
 
+  defp game_expired_message(:waiting), do: "No opponent joined before the invitation expired."
   defp game_expired_message(:inactive), do: "Both players left. This game expired."
   defp game_expired_message(:unstarted), do: "No move was made in time. This game expired."
   defp game_expired_message(:stalled), do: "This game expired after a period of inactivity."
   defp game_expired_message(_reason), do: "This game expired."
-
-  defp board_prompt(%{winner: winner}, player_side, _players) when winner in [:white, :black] do
-    cond do
-      player_side == winner -> "You won"
-      player_side in [:white, :black] -> "You lost"
-      true -> nil
-    end
-  end
-
-  defp board_prompt(%{status: :not_started}, _player_side, players) do
-    if seats_ready?(players), do: "Waiting on first move", else: "Waiting on opponent to join..."
-  end
-
-  defp board_prompt(%{current_player: current_player}, player_side, _players)
-       when player_side in [:white, :black] do
-    if player_side == current_player, do: "Your move", else: "Opponent's move"
-  end
-
-  defp board_prompt(_game, _player_side, _players), do: nil
 
   defp finish_notice(%{finish_reason: {:resignation, resigning_side}}, player_side) do
     cond do
@@ -687,8 +987,9 @@ defmodule BreakthroughWeb.GameLive do
   defp human_player?(player_token) when is_binary(player_token), do: true
   defp human_player?(_player_token), do: false
 
-  defp accessible_label({row, col}, nil), do: "Empty square #{file_label(col)}#{row}"
+  defp accessible_label({row, col}, nil),
+    do: "Empty square #{file_label(col)}#{display_rank(row, :white)}"
 
   defp accessible_label({row, col}, player) when player in [:white, :black],
-    do: "#{player_label(player)} piece on #{file_label(col)}#{row}"
+    do: "#{player_label(player)} piece on #{file_label(col)}#{display_rank(row, :white)}"
 end

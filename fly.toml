@@ -10,7 +10,8 @@ kill_signal = 'SIGTERM'
 [build]
 
 [env]
-  PHX_HOST = 'elixir-breakthrough.fly.dev'
+  PHX_HOST = 'breakthrough.slowinput.org'
+  PHX_CHECK_ORIGINS = 'https://breakthrough.slowinput.org,https://elixir-breakthrough.fly.dev'
   PORT = '8080'
 
 [http_service]
@@ -27,7 +28,6 @@ kill_signal = 'SIGTERM'
     soft_limit = 1000
 
 [[vm]]
-  memory = '1gb'
+  memory = '512mb'
   cpu_kind = 'shared'
   cpus = 1
-  memory_mb = 512

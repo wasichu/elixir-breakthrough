@@ -1,12 +1,17 @@
 const CopyText = {
   mounted() {
+    this.isDestroyed = false
     const setLabel = (text) => {
-      const label = this.el.querySelector("span")
+      if (this.isDestroyed) return
+      const label = this.el.querySelector("[data-copy-label]")
       if (label) label.textContent = text
     }
 
+    const originalLabel = this.el.querySelector("[data-copy-label]")?.textContent || "Copy link"
     const resetLabel = () => {
-      window.setTimeout(() => setLabel("Copy"), 1200)
+      if (this.isDestroyed) return
+      clearTimeout(this.resetTimer)
+      this.resetTimer = window.setTimeout(() => setLabel(originalLabel), 1800)
     }
 
     const fallbackCopy = (text) => {
@@ -17,7 +22,12 @@ const CopyText = {
         input.setSelectionRange(0, input.value.length)
       }
 
-      const copied = document.execCommand("copy")
+      let copied = false
+      try {
+        copied = document.execCommand("copy")
+      } catch (_error) {
+        // Keep the selected link available for manual copying.
+      }
       if (copied) {
         setLabel("Copied")
         resetLabel()
@@ -49,6 +59,8 @@ const CopyText = {
   },
 
   destroyed() {
+    this.isDestroyed = true
+    clearTimeout(this.resetTimer)
     this.el.removeEventListener("click", this.handleClick)
   },
 }

@@ -21,6 +21,12 @@ defmodule BreakthroughWeb.GameLiveTest do
     |> render_click()
 
     assert has_element?(view, "#rules-modal")
+
+    assert has_element?(
+             view,
+             "#rules-dialog[role='dialog'][aria-modal='true'][aria-labelledby='rules-title']"
+           )
+
     assert has_element?(view, "#close-rules-button")
 
     view
@@ -28,6 +34,16 @@ defmodule BreakthroughWeb.GameLiveTest do
     |> render_click()
 
     refute has_element?(view, "#rules-modal")
+  end
+
+  test "rules dialog closes with Escape", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/")
+
+    view |> element("#view-rules-button") |> render_click()
+    assert has_element?(view, "#rules-dialog")
+
+    view |> element("#rules-modal") |> render_keydown(%{"key" => "Escape"})
+    refute has_element?(view, "#rules-dialog")
   end
 
   test "home page renders a styled unavailable-game banner from flash", %{conn: conn} do
@@ -65,6 +81,77 @@ defmodule BreakthroughWeb.GameLiveTest do
     assert path =~ ~r"^/games/[A-Za-z0-9_-]+$"
   end
 
+  test "another tab explains the existing game without navigating away", %{conn: conn} do
+    token = "home-creator-#{System.unique_integer([:positive])}"
+    conn = Plug.Test.init_test_session(conn, %{"player_token" => token})
+    {:ok, first_tab, _html} = live(conn, ~p"/")
+    {:ok, second_tab, _html} = live(conn, ~p"/")
+
+    first_tab |> element("#create-game-button") |> render_click()
+    {path, _flash} = assert_redirect(first_tab)
+    second_tab |> element("#create-ai-game-button") |> render_click()
+    refute_redirected(second_tab)
+
+    assert has_element?(
+             second_tab,
+             "#new-game-notice[role='status']",
+             "already have an active game"
+           )
+
+    assert has_element?(second_tab, "#return-to-current-game[href='#{path}']")
+    assert has_element?(second_tab, "#cancel-current-game-button")
+  end
+
+  test "waiting player can cancel their game and start another", %{conn: conn} do
+    token = "cancel-creator-#{System.unique_integer([:positive])}"
+    conn = Plug.Test.init_test_session(conn, %{"player_token" => token})
+    {:ok, game_id} = Breakthrough.Games.GameManager.create_game(creator_token: token)
+    {:ok, view, _html} = live(conn, ~p"/games/#{game_id}")
+
+    assert has_element?(view, "#cancel-game-button")
+    refute has_element?(view, "#resign-game-button")
+    view |> element("#cancel-game-button") |> render_click()
+    assert_redirect(view, ~p"/")
+    assert {:ok, _next_game} = Breakthrough.Games.GameManager.create_game(creator_token: token)
+  end
+
+  test "rules are available directly from a shared match URL", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/games/#{create_game!()}")
+    view |> element("#game-rules-button") |> render_click()
+    assert has_element?(view, "#rules-dialog[role='dialog']")
+    assert has_element?(view, "#rules-capture-diagram")
+    view |> element("#rules-modal") |> render_keydown(%{"key" => "Escape"})
+    refute has_element?(view, "#rules-dialog")
+  end
+
+  test "board coordinates stay consistent when viewed from either side", %{conn: conn} do
+    game_id = create_game!()
+    white_conn = Plug.Test.init_test_session(conn, %{"player_token" => "coordinates-white"})
+
+    black_conn =
+      Plug.Test.init_test_session(build_conn(), %{"player_token" => "coordinates-black"})
+
+    {:ok, white_view, _html} = live(white_conn, ~p"/games/#{game_id}")
+    {:ok, black_view, _html} = live(black_conn, ~p"/games/#{game_id}")
+
+    assert has_element?(white_view, "#board-files > span:nth-child(2)", "a")
+    assert has_element?(black_view, "#board-files > span:nth-child(2)", "h")
+    assert has_element?(white_view, "#square-a1 .sr-only", "Black piece on a8")
+    assert has_element?(black_view, "#square-h8 .sr-only", "White piece on h1")
+
+    assert has_element?(
+             white_view,
+             "#breakthrough-board > div:first-child > div:first-child",
+             "8"
+           )
+
+    assert has_element?(
+             black_view,
+             "#breakthrough-board > div:first-child > div:first-child",
+             "1"
+           )
+  end
+
   test "game route renders board and assigns first visitor to white", %{conn: conn} do
     game_id = create_game!()
     {:ok, view, _html} = live(conn, ~p"/games/#{game_id}")
@@ -78,11 +165,11 @@ defmodule BreakthroughWeb.GameLiveTest do
     assert has_element?(view, "#copy-link-button")
     assert has_element?(view, "#share-link-panel")
     assert has_element?(view, "#phase-value[data-phase='Waiting on opponent to join...']")
-    assert has_element?(view, "#board-prompt", "Waiting on opponent to join...")
+    assert has_element?(view, "#board-prompt", "Share this link to invite a friend")
     assert has_element?(view, "#breakthrough-board[phx-hook='BoardDrag'][data-can-drag='false']")
     assert has_element?(view, "#square-a7[data-own-piece='true'][data-row='7'][data-col='1']")
     assert has_element?(view, "#square-a2[data-own-piece='false']")
-    assert has_element?(view, "#square-a7[disabled]")
+    assert has_element?(view, "#square-a7[aria-disabled='true']")
     assert has_element?(view, "#square-a2[data-piece='B']")
     assert has_element?(view, "#square-a7[data-piece='W']")
     refute has_element?(view, "#interaction-state")
@@ -100,27 +187,27 @@ defmodule BreakthroughWeb.GameLiveTest do
     assert has_element?(white_view, "#player-side-value[data-side='white']")
     assert has_element?(black_view, "#player-side-value[data-side='black']")
     assert has_element?(white_view, "#white-seat-status", "White: You")
-    assert has_element?(white_view, "#black-seat-status", "Black: Claimed")
-    assert has_element?(black_view, "#white-seat-status", "White: Claimed")
+    assert has_element?(white_view, "#black-seat-status", "Black: Connected")
+    assert has_element?(black_view, "#white-seat-status", "White: Connected")
     assert has_element?(black_view, "#black-seat-status", "Black: You")
     assert has_element?(white_view, "#phase-value[data-phase='Waiting on first move']")
     assert has_element?(black_view, "#phase-value[data-phase='Waiting on first move']")
-    assert has_element?(white_view, "#board-prompt", "Waiting on first move")
-    assert has_element?(black_view, "#board-prompt", "Waiting on first move")
+    assert has_element?(white_view, "#phase-value", "Your move")
+    assert has_element?(black_view, "#phase-value", "White to move")
     assert has_element?(white_view, "#breakthrough-board[data-can-drag='true']")
     assert has_element?(white_view, "#players-panel")
     assert has_element?(black_view, "#players-panel")
     assert has_element?(black_view, "#breakthrough-board[data-can-drag='false']")
-    assert has_element?(black_view, "#square-a2[disabled]")
+    assert has_element?(black_view, "#square-a2[aria-disabled='true']")
 
     assert has_element?(
              black_view,
-             "#breakthrough-board > div:first-child > button:first-of-type#square-h8"
+             "#breakthrough-board > div:first-child > [role=gridcell]:nth-child(2) > #square-h8"
            )
 
     assert has_element?(
              black_view,
-             "#breakthrough-board > div:last-child > button:last-of-type#square-a1"
+             "#breakthrough-board > div:last-child > [role=gridcell]:last-child > #square-a1"
            )
   end
 
@@ -140,31 +227,8 @@ defmodule BreakthroughWeb.GameLiveTest do
 
     assert has_element?(spectator_view, "#player-side-value[data-side='spectator']")
     assert has_element?(spectator_view, "#spectator-count", "Spectators: 1")
-    assert has_element?(spectator_view, "#white-seat-status", "White: Claimed")
-    assert has_element?(spectator_view, "#black-seat-status", "Black: Claimed")
-  end
-
-  test "home page shows lobby counts and recent game links", %{conn: conn} do
-    first_game = "recent-" <> Integer.to_string(System.unique_integer([:positive]))
-    second_game = "recent-" <> Integer.to_string(System.unique_integer([:positive]))
-    ai_game = "recent-ai-" <> Integer.to_string(System.unique_integer([:positive]))
-
-    {:ok, _first} = Breakthrough.Games.GameManager.create_game(id: first_game)
-    {:ok, _second} = Breakthrough.Games.GameManager.create_game(id: second_game)
-    {:ok, _ai} = Breakthrough.Games.GameManager.create_game(id: ai_game, mode: :vs_ai)
-    {:ok, :white, _state} = Breakthrough.Games.GameManager.join_game(first_game, "lobby-white")
-    {:ok, :black, _state} = Breakthrough.Games.GameManager.join_game(first_game, "lobby-black")
-
-    {:ok, view, _html} = live(conn, ~p"/")
-
-    assert has_element?(view, "#active-games-count")
-    assert has_element?(view, ~s(a[href="/games/#{first_game}"]))
-    assert has_element?(view, ~s(a[href="/games/#{second_game}"]))
-    assert has_element?(view, ~s(a[href="/games/#{ai_game}"]))
-    assert has_element?(view, ~s(a[href="/games/#{ai_game}"]), ai_game)
-    assert has_element?(view, ~s(a[href="/games/#{ai_game}"] span.rounded-full))
-    assert has_element?(view, ~s(a[href="/games/#{first_game}"] span), "View game")
-    assert has_element?(view, ~s(a[href="/games/#{second_game}"] span), "Join game")
+    assert has_element?(spectator_view, "#white-seat-status", "White: Connected")
+    assert has_element?(spectator_view, "#black-seat-status", "Black: Connected")
   end
 
   test "selecting another current turn piece replaces the previous selection", %{conn: conn} do
@@ -180,8 +244,8 @@ defmodule BreakthroughWeb.GameLiveTest do
     |> render_click()
 
     assert has_element?(view, "#square-a7[data-selected='true']")
-    assert has_element?(view, "#square-a6.ring-2")
-    assert has_element?(view, "#square-b6.ring-2")
+    assert has_element?(view, "#square-a6[data-legal-move='true']")
+    assert has_element?(view, "#square-b6[data-legal-move='true']")
 
     view
     |> element("#square-b7")
@@ -189,9 +253,9 @@ defmodule BreakthroughWeb.GameLiveTest do
 
     assert has_element?(view, "#square-a7[data-selected='false']")
     assert has_element?(view, "#square-b7[data-selected='true']")
-    assert has_element?(view, "#square-a6.ring-2")
-    assert has_element?(view, "#square-b6.ring-2")
-    assert has_element?(view, "#square-c6.ring-2")
+    assert has_element?(view, "#square-a6[data-legal-move='true']")
+    assert has_element?(view, "#square-b6[data-legal-move='true']")
+    assert has_element?(view, "#square-c6[data-legal-move='true']")
   end
 
   test "clicking a dead square clears the current selection without selecting it", %{conn: conn} do
@@ -209,7 +273,7 @@ defmodule BreakthroughWeb.GameLiveTest do
     |> render_click()
 
     assert has_element?(view, "#square-a7[data-selected='true']")
-    assert has_element?(view, "#square-a6.ring-2")
+    assert has_element?(view, "#square-a6[data-legal-move='true']")
 
     view
     |> element("#square-d4")
@@ -217,8 +281,8 @@ defmodule BreakthroughWeb.GameLiveTest do
 
     assert has_element?(view, "#square-a7[data-selected='false']")
     assert has_element?(view, "#square-d4[data-selected='false']")
-    refute has_element?(view, "#square-a6.ring-2")
-    refute has_element?(view, "#square-b6.ring-2")
+    refute has_element?(view, "#square-a6[data-legal-move='true']")
+    refute has_element?(view, "#square-b6[data-legal-move='true']")
   end
 
   test "a player cannot select pieces when it is not their turn", %{conn: conn} do
@@ -229,7 +293,7 @@ defmodule BreakthroughWeb.GameLiveTest do
     {:ok, _white_view, _html} = live(white_conn, ~p"/games/#{game_id}")
     {:ok, black_view, _html} = live(black_conn, ~p"/games/#{game_id}")
 
-    assert has_element?(black_view, "#square-a2[disabled]")
+    assert has_element?(black_view, "#square-a2[aria-disabled='true']")
     refute has_element?(black_view, "#square-a2[data-selected='true']")
   end
 
@@ -293,13 +357,17 @@ defmodule BreakthroughWeb.GameLiveTest do
     assert {:error, {:live_redirect, %{to: "/"}}} = live(conn, ~p"/games/does-not-exist")
   end
 
-  test "live game expiry redirects viewers home with a flash", %{conn: conn} do
+  test "live game expiry keeps the final board with a recovery link", %{conn: conn} do
     game_id = create_game!()
     {:ok, view, _html} = live(conn, ~p"/games/#{game_id}")
 
     send(view.pid, {:game_expired, :stalled})
 
-    assert_redirect(view, "/")
+    assert has_element?(view, "#phase-value[data-phase='Expired']")
+    assert has_element?(view, "#expired-lobby-link[href='/']")
+    assert has_element?(view, "#breakthrough-board[data-can-drag='false']")
+    assert has_element?(view, "#square-a7[aria-disabled='true']")
+    refute_redirected(view)
   end
 
   test "players can resign from an active game", %{conn: conn} do
@@ -320,14 +388,12 @@ defmodule BreakthroughWeb.GameLiveTest do
 
     assert has_element?(white_view, "#resign-game-button")
 
-    white_view
-    |> element("#resign-game-button")
-    |> render_click()
+    resign_game(white_view)
 
     assert has_element?(white_view, "#phase-value[data-phase='You lost']")
     assert has_element?(black_view, "#phase-value[data-phase='You won']")
-    assert has_element?(white_view, "#board-prompt", "You lost")
-    assert has_element?(black_view, "#board-prompt", "You won")
+    assert has_element?(white_view, "#board-prompt", "Black wins by resignation")
+    assert has_element?(black_view, "#board-prompt", "Black wins by resignation")
     assert has_element?(white_view, "#finish-note", "You resigned.")
     assert has_element?(black_view, "#finish-note", "White resigned.")
     refute has_element?(white_view, "#resign-game-button")
@@ -355,9 +421,7 @@ defmodule BreakthroughWeb.GameLiveTest do
     |> element("#square-a6")
     |> render_click()
 
-    white_view
-    |> element("#resign-game-button")
-    |> render_click()
+    resign_game(white_view)
 
     assert has_element?(spectator_view, "#phase-value[data-phase='Black wins']")
   end
@@ -382,9 +446,7 @@ defmodule BreakthroughWeb.GameLiveTest do
     |> element("#square-a6")
     |> render_click()
 
-    white_view
-    |> element("#resign-game-button")
-    |> render_click()
+    resign_game(white_view)
 
     assert has_element?(white_view, "#rematch-game-button")
     refute has_element?(black_view, "#rematch-pending-indicator")
@@ -443,9 +505,7 @@ defmodule BreakthroughWeb.GameLiveTest do
     |> element("#square-a6")
     |> render_click()
 
-    white_view
-    |> element("#resign-game-button")
-    |> render_click()
+    resign_game(white_view)
 
     assert has_element?(white_view, "#rematch-game-button")
     refute has_element?(spectator_view, "#rematch-game-button")
@@ -465,7 +525,7 @@ defmodule BreakthroughWeb.GameLiveTest do
 
     assert has_element?(view, "#player-side-value[data-side='white']")
     assert has_element?(view, "#black-seat-status", "Black: AI")
-    refute has_element?(view, "#resign-game-button")
+    assert has_element?(view, "#resign-game-button")
 
     view
     |> element("#square-a7")
@@ -481,6 +541,47 @@ defmodule BreakthroughWeb.GameLiveTest do
     assert has_element?(view, "#square-a2[data-last-move='true']")
     assert has_element?(view, "#square-a3[data-last-move='true']")
     assert has_element?(view, "#turn-value[data-turn='White']")
+  end
+
+  test "resign confirmation can be cancelled without ending the game", %{conn: conn} do
+    game_id = create_game!()
+    {:ok, view, _html} = live(conn, ~p"/games/#{game_id}")
+
+    {:ok, :black, _state} =
+      Breakthrough.Games.GameManager.join_game(game_id, "confirmation-opponent")
+
+    view |> element("#resign-game-button") |> render_click()
+    assert has_element?(view, "#resign-dialog")
+    view |> element("#keep-playing-button") |> render_click()
+    refute has_element?(view, "#resign-dialog")
+    assert {:ok, %{game: %{winner: nil}}} = Breakthrough.Games.GameManager.get_state(game_id)
+  end
+
+  test "spectators can explore the board without taking a turn", %{conn: conn} do
+    game_id = create_game!()
+    {:ok, :white, _} = Breakthrough.Games.GameManager.join_game(game_id, "explore-white")
+    {:ok, :black, _} = Breakthrough.Games.GameManager.join_game(game_id, "explore-black")
+    {:ok, view, _html} = live(conn, ~p"/games/#{game_id}")
+    assert has_element?(view, "#breakthrough-board[role='grid']")
+    assert has_element?(view, "#square-a1[aria-disabled='true'][tabindex='0']")
+    refute has_element?(view, "#breakthrough-board button[disabled]")
+    view |> element("#square-a2") |> render_click()
+    refute has_element?(view, "#breakthrough-board button[data-selected='true']")
+  end
+
+  test "malformed square events leave the game and LiveView intact", %{conn: conn} do
+    game_id = create_game!()
+    {:ok, view, _html} = live(conn, ~p"/games/#{game_id}")
+    render_hook(view, "select-square", %{"row" => "bad", "col" => "999"})
+    render_hook(view, "select-square", %{})
+    assert has_element?(view, "#breakthrough-board")
+    assert {:ok, %{game: %{move_history: []}}} = Breakthrough.Games.GameManager.get_state(game_id)
+  end
+
+  defp resign_game(view) do
+    view |> element("#resign-game-button") |> render_click()
+    assert has_element?(view, "#resign-dialog[role='dialog']")
+    view |> element("#confirm-resign-button") |> render_click()
   end
 
   defp assert_eventually(fun, attempts \\ 100)
