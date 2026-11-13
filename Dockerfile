@@ -50,7 +50,7 @@ RUN mix release
 
 # start a new build stage so that the final image will only contain
 # the compiled release and other runtime necessities
-FROM docker.io/debian:trixie-20261005-slim AS final
+FROM docker.io/debian:trixie-20261104-slim AS final
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends libstdc++6 openssl libncurses6 locales ca-certificates \
